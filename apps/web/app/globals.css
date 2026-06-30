@@ -1,0 +1,25 @@
+:root {
+  color-scheme: light;
+  background: #f5f7fb;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  background: #f5f7fb;
+}
+
+.positive {
+  color: #d9363e;
+}
+
+.negative {
+  color: #389e0d;
+}
+
+.muted {
+  color: #8c8c8c;
+}

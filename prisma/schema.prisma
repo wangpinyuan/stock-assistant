@@ -1,0 +1,268 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+model Stock {
+  id        Int       @id @default(autoincrement())
+  code      String    @unique
+  name      String
+  market    String?
+  industry  String?
+  sector    String?
+  assetType String @default("stock")
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  holdings     Holding[]
+  watchlist    WatchlistItem?
+  quotes       Quote[]
+  klineDaily   KlineDaily[]
+  klineWeekly  KlineWeekly[]
+  klineMonthly KlineMonthly[]
+  intraday     IntradayQuote[]
+  fundFlows    FundFlow[]
+  newsItems    NewsItem[]
+  aiReports    AiReport[]
+
+  @@index([assetType])
+  @@index([industry])
+  @@index([sector])
+}
+
+model Holding {
+  id          Int       @id @default(autoincrement())
+  code        String
+  name        String
+  assetType   String
+  quantity    Decimal
+  averageCost Decimal
+  buyDate     DateTime?
+  tags        String?
+  note        String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  stock Stock @relation(fields: [code], references: [code])
+
+  @@index([code])
+  @@index([assetType])
+}
+
+model WatchlistItem {
+  id        Int     @id @default(autoincrement())
+  code      String  @unique
+  name      String
+  sortOrder Int     @default(0)
+  note      String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  stock Stock @relation(fields: [code], references: [code])
+
+  @@index([sortOrder])
+}
+
+model Quote {
+  id            Int      @id @default(autoincrement())
+  code          String
+  tradeDate     DateTime
+  currentPrice  Decimal
+  open          Decimal?
+  high          Decimal?
+  low           Decimal?
+  close         Decimal?
+  preClose      Decimal?
+  changeAmount  Decimal?
+  changePercent Decimal?
+  volume        Decimal?
+  turnover      Decimal?
+  turnoverRate  Decimal?
+
+  createdAt DateTime @default(now())
+
+  stock Stock @relation(fields: [code], references: [code])
+
+  @@unique([code, tradeDate])
+  @@index([tradeDate])
+}
+
+model KlineDaily {
+  id        Int      @id @default(autoincrement())
+  code      String
+  tradeDate DateTime
+  open      Decimal
+  high      Decimal
+  low       Decimal
+  close     Decimal
+  volume    Decimal?
+  turnover  Decimal?
+  ma5       Decimal?
+  ma10      Decimal?
+  ma20      Decimal?
+
+  createdAt DateTime @default(now())
+
+  stock Stock @relation(fields: [code], references: [code])
+
+  @@unique([code, tradeDate])
+  @@index([tradeDate])
+}
+
+model KlineWeekly {
+  id       Int      @id @default(autoincrement())
+  code     String
+  weekDate DateTime
+  open     Decimal
+  high     Decimal
+  low      Decimal
+  close    Decimal
+  volume   Decimal?
+  ma5      Decimal?
+  ma10     Decimal?
+  ma20     Decimal?
+
+  createdAt DateTime @default(now())
+
+  stock Stock @relation(fields: [code], references: [code])
+
+  @@unique([code, weekDate])
+  @@index([weekDate])
+}
+
+model KlineMonthly {
+  id        Int      @id @default(autoincrement())
+  code      String
+  monthDate DateTime
+  open      Decimal
+  high      Decimal
+  low       Decimal
+  close     Decimal
+  volume    Decimal?
+  ma5       Decimal?
+  ma10      Decimal?
+  ma20      Decimal?
+
+  createdAt DateTime @default(now())
+
+  stock Stock @relation(fields: [code], references: [code])
+
+  @@unique([code, monthDate])
+  @@index([monthDate])
+}
+
+model IntradayQuote {
+  id        Int      @id @default(autoincrement())
+  code      String
+  tradeDate DateTime
+  time      String
+  price     Decimal
+  volume    Decimal?
+  amount    Decimal?
+
+  createdAt DateTime @default(now())
+
+  stock Stock @relation(fields: [code], references: [code])
+
+  @@unique([code, tradeDate, time])
+  @@index([tradeDate])
+}
+
+model PortfolioSnapshot {
+  id               Int      @id @default(autoincrement())
+  snapshotDate     DateTime @unique
+  totalMarketValue Decimal
+  todayProfit      Decimal
+  todayProfitRate  Decimal
+  totalProfit      Decimal
+  totalProfitRate  Decimal
+  stockWeight      Decimal?
+  etfWeight        Decimal?
+  snapshotJson     String
+
+  createdAt DateTime @default(now())
+
+  @@index([snapshotDate])
+}
+
+model FundFlow {
+  id                  Int           @id @default(autoincrement())
+  level               String
+  code                String?
+  name                String?
+  flowDate            DateTime
+  mainNetInflow       Decimal?
+  largeOrderNetInflow Decimal?
+  changePercent       Decimal?
+  rawJson             String?
+
+  createdAt DateTime @default(now())
+
+  stock Stock? @relation(fields: [code], references: [code])
+
+  @@index([level])
+  @@index([code])
+  @@index([flowDate])
+}
+
+model NewsItem {
+  id              Int       @id @default(autoincrement())
+  type            String
+  code            String?
+  title           String
+  source          String?
+  publishDate     DateTime
+  url             String?
+  summary         String?
+  sentiment       String    @default("neutral")
+  impactOnHolding Boolean   @default(false)
+  impactSummary   String?
+  rawJson         String?
+
+  createdAt DateTime @default(now())
+
+  stock Stock? @relation(fields: [code], references: [code])
+
+  @@index([type])
+  @@index([code])
+  @@index([publishDate])
+  @@index([sentiment])
+  @@index([impactOnHolding])
+}
+
+model AiReport {
+  id            Int          @id @default(autoincrement())
+  type          String
+  targetCode    String?
+  reportDate    DateTime
+  model         String
+  inputSnapshot String
+  summary       String
+  contentJson   String
+  riskLevel     String?
+  sentiment     String?
+
+  createdAt DateTime @default(now())
+
+  stock Stock? @relation(fields: [targetCode], references: [code])
+
+  @@index([type])
+  @@index([targetCode])
+  @@index([reportDate])
+}
+
+model Setting {
+  id        Int      @id @default(autoincrement())
+  key       String   @unique
+  value     String
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
