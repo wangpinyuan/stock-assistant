@@ -1,5 +1,12 @@
 import type { FastifyInstance } from 'fastify';
-import { getStockDetail, getStockKline, getStockNews, getStockQuote } from '../services/stockService';
+import {
+  getStockAnalysisSignals,
+  getStockDetail,
+  getStockFundFlow,
+  getStockKline,
+  getStockNews,
+  getStockQuote
+} from '../services/stockService';
 
 export async function stocksRoutes(app: FastifyInstance) {
   app.get('/:code', async (request) => getStockDetail((request.params as { code: string }).code));
@@ -12,9 +19,13 @@ export async function stocksRoutes(app: FastifyInstance) {
     return getStockKline(code, period);
   });
 
-  app.get('/:code/fund-flow', async () => ({ items: [] }));
+  app.get('/:code/fund-flow', async (request) =>
+    getStockFundFlow((request.params as { code: string }).code)
+  );
 
   app.get('/:code/news', async (request) => getStockNews((request.params as { code: string }).code));
 
-  app.get('/:code/analysis-signals', async () => ({ signals: [] }));
+  app.get('/:code/analysis-signals', async (request) =>
+    getStockAnalysisSignals((request.params as { code: string }).code)
+  );
 }

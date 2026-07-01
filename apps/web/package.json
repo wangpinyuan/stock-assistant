@@ -3,28 +3,32 @@
   "version": "0.1.0",
   "private": true,
   "type": "module",
+  "overrides": {
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1"
+  },
   "scripts": {
-    "dev": "next dev -p ${WEB_PORT:-3000}",
+    "dev": "next dev -p ${WEB_PORT:-8888}",
     "build": "next build",
-    "start": "next start -p ${WEB_PORT:-3000}",
+    "start": "next start -p ${WEB_PORT:-8888}",
     "lint": "next lint",
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
-    "@ant-design/charts": "^2.2.6",
+    "@ant-design/charts": "2.2.6",
     "@ant-design/nextjs-registry": "^1.0.2",
     "@stock-assistant/shared": "*",
-    "lightweight-charts": "^4.2.2",
-    "antd": "^5.22.5",
+    "antd": "5.22.5",
     "echarts": "^5.5.1",
     "echarts-for-react": "^3.0.2",
+    "lightweight-charts": "^4.2.2",
     "next": "^15.1.0",
-    "react": "^19.0.0",
-    "react-dom": "^19.0.0"
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1"
   },
   "devDependencies": {
-    "@types/react": "^19.0.1",
-    "@types/react-dom": "^19.0.2",
+    "@types/react": "^18.3.1",
+    "@types/react-dom": "^18.3.1",
     "typescript": "^5.7.2"
   }
 }
