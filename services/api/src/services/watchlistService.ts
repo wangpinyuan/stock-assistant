@@ -1,21 +1,26 @@
 import { prisma } from '../plugins/prisma';
 import { execSync } from 'child_process';
-import { resolve } from 'path';
+import { resolve, dirname } from 'path';
+import { fileURLToPath } from 'url';
+import { toNumberOrNull, isValidStockCode } from '@stock-assistant/shared';
 
-function toNumberOrNull(value: unknown) {
-  return value == null ? null : Number(value);
-}
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = dirname(__filename);
 
 function lookupStockFromAkShare(code: string): { name: string | null; assetType: 'stock' | 'etf'; currentPrice?: number; changePercent?: number } {
+  // Validate stock code format to prevent command injection
+  if (!isValidStockCode(code)) {
+    return { name: null, assetType: 'stock' };
+  }
   try {
-    const scriptsDir = resolve(__dirname, '..', '..', '..', '..', 'worker', 'scripts');
+    const scriptsDir = resolve(__dirname, '..', '..', '..', 'worker', 'scripts');
     const result = execSync(`python3 "${scriptsDir}/lookup_stock.py" "${code}"`, {
       timeout: 15000,
       encoding: 'utf-8'
     });
-    const data = JSON.parse(result) as { ok: boolean; name?: string; currentPrice?: number; changePercent?: number; error?: string };
+    const data = JSON.parse(result) as { ok: boolean; name?: string; price?: number; pct?: number; error?: string };
     if (!data.ok) return { name: null, assetType: 'stock' };
-    return { name: data.name ?? null, assetType: 'stock', currentPrice: data.currentPrice, changePercent: data.changePercent };
+    return { name: data.name ?? null, assetType: 'stock', currentPrice: data.price, changePercent: data.pct };
   } catch {
     return { name: null, assetType: 'stock' };
   }
@@ -76,7 +81,7 @@ async function ensureStock(code: string, name: string, assetType: 'stock' | 'etf
 
 export async function createWatchlistItem(input: WatchlistInput) {
   const stock = await prisma.stock.findUnique({ where: { code: input.code } });
-  let name: string | null | undefined = input.name?.trim() || stock?.name;
+  let name: string | null | undefined = input.name?.trim();
   let assetType = (stock?.assetType as 'stock' | 'etf') ?? 'stock';
   let quoteData: { currentPrice?: number; changePercent?: number } = {};
 

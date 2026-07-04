@@ -1,3 +1,5 @@
+export * from './market';
+
 export type AssetType = 'stock' | 'etf';
 
 export interface PortfolioSummary {

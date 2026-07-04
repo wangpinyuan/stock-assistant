@@ -1,8 +1,5 @@
 import { prisma } from '../plugins/prisma';
-
-function toNumberOrNull(value: unknown) {
-  return value == null ? null : Number(value);
-}
+import { toNumberOrNull } from '@stock-assistant/shared';
 
 export interface NewsRow {
   id: number;

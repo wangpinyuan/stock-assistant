@@ -1,8 +1,5 @@
 import { prisma } from '../plugins/prisma';
-
-function toNumberOrNull(value: unknown) {
-  return value == null ? null : Number(value);
-}
+import { toNumberOrNull } from '@stock-assistant/shared';
 
 export interface FundFlowRow {
   id: number;
@@ -47,9 +44,10 @@ export async function getMarketFundFlow(limit = 20) {
 }
 
 export async function getSectorFundFlow(limit = 20) {
+  // Get concept board (theme sector) fund flow directly from FundFlow table
   const items = await prisma.fundFlow.findMany({
     where: { level: 'sector' },
-    orderBy: { flowDate: 'desc' },
+    orderBy: { mainNetInflow: 'desc' },
     take: limit
   });
   return { items: items.map(toRow) };
@@ -82,6 +80,15 @@ export async function getWatchlistFundFlow(limit = 20) {
   if (codes.length === 0) return { items: [] };
   const items = await prisma.fundFlow.findMany({
     where: { code: { in: codes }, level: 'stock' },
+    orderBy: { flowDate: 'desc' },
+    take: limit
+  });
+  return { items: items.map(toRow) };
+}
+
+export async function getFundFlowByLevel(level: string, limit = 10) {
+  const items = await prisma.fundFlow.findMany({
+    where: { level },
     orderBy: { flowDate: 'desc' },
     take: limit
   });

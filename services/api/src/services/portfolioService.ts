@@ -1,8 +1,5 @@
 import { prisma } from '../plugins/prisma';
-
-function toNumber(value: unknown) {
-  return Number(value ?? 0);
-}
+import { toNumber } from '@stock-assistant/shared';
 
 export async function getPortfolioSummary() {
   const holdings = await prisma.holding.findMany({

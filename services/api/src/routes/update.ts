@@ -1,10 +1,11 @@
 import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
 import { runWorker } from '../services/workerRunner';
+import { validateStockCodes } from '@stock-assistant/shared';
 
 const codesBodySchema = z.object({
   codes: z.array(z.string()).optional(),
-  source: z.enum(['akshare', 'tushare']).optional()
+  source: z.enum(['akshare', 'tushare', 'sina']).optional()
 });
 
 type CodesBody = z.infer<typeof codesBodySchema>;
@@ -16,7 +17,12 @@ function parseBody(body: unknown): CodesBody {
 
 function buildArgs(parsed: CodesBody, prefix: string[] = []): string[] {
   const args = [...prefix];
-  if (parsed.codes?.length) args.push('--codes', parsed.codes.join(','));
+  if (parsed.codes?.length) {
+    const validCodes = validateStockCodes(parsed.codes);
+    if (validCodes.length > 0) {
+      args.push('--codes', validCodes.join(','));
+    }
+  }
   if (parsed.source) args.push('--source', parsed.source);
   return args;
 }
@@ -33,9 +39,10 @@ export async function updateRoutes(app: FastifyInstance) {
   app.post('/holdings', async (request) => runUpdate('update_quotes.py', request.body));
   app.post('/watchlist', async (request) => runUpdate('update_quotes.py', request.body));
 
-  app.post('/market', async () => ({ ok: false, error: 'Market update worker is not implemented yet.' }));
+  app.post('/market', async (request) => runUpdate('update_quotes.py', { ...(request.body as object || {}), source: 'sina' }));
   app.post('/fund-flow', async () => ({ ok: false, error: 'Fund flow update worker is not implemented yet.' }));
   app.post('/news', async () => ({ ok: false, error: 'News update worker is not implemented yet.' }));
+  app.post('/kline', async (request) => runUpdate('update_kline.py', request.body));
 
   app.post('/all', async (request) => {
     const parsed = parseBody(request.body);

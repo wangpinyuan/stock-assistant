@@ -9,11 +9,7 @@ const { Content, Sider } = Layout;
 
 const menuItems = [
   { key: '/', label: <Link href="/">首页</Link> },
-  { key: '/holdings', label: <Link href="/holdings">持仓</Link> },
-  { key: '/watchlist', label: <Link href="/watchlist">自选</Link> },
   { key: '/market', label: <Link href="/market">市场</Link> },
-  { key: '/fund-flow', label: <Link href="/fund-flow">资金流</Link> },
-  { key: '/news', label: <Link href="/news">资讯</Link> },
   { key: '/ai', label: <Link href="/ai">AI分析</Link> },
   { key: '/settings', label: <Link href="/settings">设置</Link> }
 ];

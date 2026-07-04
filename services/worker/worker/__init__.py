@@ -1,0 +1,1 @@
+"""stock-assistant worker package."""

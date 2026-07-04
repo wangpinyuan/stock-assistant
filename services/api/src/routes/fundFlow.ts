@@ -4,7 +4,8 @@ import {
   getPortfolioFundFlow,
   getSectorFundFlow,
   getStockFundFlow,
-  getWatchlistFundFlow
+  getWatchlistFundFlow,
+  getFundFlowByLevel
 } from '../services/fundFlowService';
 
 export async function fundFlowRoutes(app: FastifyInstance) {
@@ -15,4 +16,6 @@ export async function fundFlowRoutes(app: FastifyInstance) {
   );
   app.get('/portfolio', async () => getPortfolioFundFlow());
   app.get('/watchlist', async () => getWatchlistFundFlow());
+  app.get('/inflows', async () => getFundFlowByLevel('stock_inflow'));
+  app.get('/outflows', async () => getFundFlowByLevel('stock_outflow'));
 }

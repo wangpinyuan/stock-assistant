@@ -1,12 +1,5 @@
 import { prisma } from '../plugins/prisma';
-
-function toNumber(value: unknown) {
-  return Number(value ?? 0);
-}
-
-function toNumberOrNull(value: unknown) {
-  return value == null ? null : Number(value);
-}
+import { toNumber, toNumberOrNull } from '@stock-assistant/shared';
 
 export async function getStockDetail(code: string) {
   return prisma.stock.findUnique({ where: { code } });

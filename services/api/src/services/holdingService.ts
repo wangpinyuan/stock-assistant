@@ -1,18 +1,15 @@
 import { prisma } from '../plugins/prisma';
 import { execSync } from 'child_process';
 import { resolve } from 'path';
-
-function toNumber(value: unknown) {
-  return Number(value ?? 0);
-}
-
-function toNumberOrNull(value: unknown) {
-  return value == null ? null : Number(value);
-}
+import { toNumber, toNumberOrNull, isValidStockCode } from '@stock-assistant/shared';
 
 function lookupStockFromAkShare(code: string): { name: string | null; assetType: 'stock' | 'etf' } {
+  // Validate stock code format to prevent command injection
+  if (!isValidStockCode(code)) {
+    return { name: null, assetType: 'stock' };
+  }
   try {
-    const scriptsDir = resolve(__dirname, '..', '..', '..', '..', 'worker', 'scripts');
+    const scriptsDir = resolve(__dirname, '..', '..', '..', 'worker', 'scripts');
     const result = execSync(`python3 "${scriptsDir}/lookup_stock.py" "${code}"`, {
       timeout: 15000,
       encoding: 'utf-8'
