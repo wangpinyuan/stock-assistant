@@ -13,14 +13,12 @@ interface Props {
   onDefaultModelChange: (v: string) => void;
   onDeepModelChange: (v: string) => void;
   onSaved: () => void;
-  getApiKey: () => string;
-  getDefaultModel: () => string;
 }
 
 export function ClaudeSettingsCard({
   apiKey, defaultModel, deepModel,
   onApiKeyChange, onDefaultModelChange, onDeepModelChange,
-  onSaved, getApiKey, getDefaultModel
+  onSaved
 }: Props) {
   const [saving, setSaving] = useState(false);
   const [testing, setTesting] = useState(false);
@@ -40,7 +38,6 @@ export function ClaudeSettingsCard({
     try {
       await putApi('/settings', { items });
       message.success('Claude 配置已保存');
-      onApiKeyChange('');
       onSaved();
     } catch (err) {
       message.error(err instanceof Error ? err.message : '保存失败');
@@ -50,8 +47,8 @@ export function ClaudeSettingsCard({
   };
 
   const test = async () => {
-    const key = apiKey.trim() || getApiKey();
-    const model = defaultModel.trim() || getDefaultModel() || DEFAULT_CLAUDE_MODEL;
+    const key = apiKey.trim() || DEFAULT_CLAUDE_MODEL;
+    const model = defaultModel.trim() || DEFAULT_CLAUDE_MODEL;
     if (!key) { message.warning('未配置 Claude API Key'); return; }
     setTesting(true);
     setResult(null);
@@ -66,21 +63,26 @@ export function ClaudeSettingsCard({
   };
 
   return (
-    <>
-      <Input.Password value={apiKey} onChange={(e) => onApiKeyChange(e.target.value)} placeholder="粘贴新 API Key 以更新（留空仅测试）" />
+    <Space direction="vertical" style={{ width: '100%' }} size="middle">
+      <Input.Password
+        value={apiKey}
+        onChange={(e) => onApiKeyChange(e.target.value)}
+        placeholder="粘贴新的 API Key"
+        size="large"
+      />
       <Space.Compact style={{ width: '100%' }}>
-        <span style={{ lineHeight: '32px', padding: '0 12px', background: '#f0f0f0', border: '1px solid #d9d9d9', borderRight: 0, borderRadius: '6px 0 0 6px' }}>默认模型</span>
+        <span style={{ lineHeight: '32px', padding: '0 12px', background: '#f0f0f0', border: '1px solid #d9d9d9', borderRight: 0, borderRadius: '6px 0 0 6px', fontSize: 12, color: '#666' }}>默认模型</span>
         <Input value={defaultModel} onChange={(e) => onDefaultModelChange(e.target.value)} placeholder="例如 claude-sonnet-4-6" style={{ flex: 1 }} />
       </Space.Compact>
       <Space.Compact style={{ width: '100%' }}>
-        <span style={{ lineHeight: '32px', padding: '0 12px', background: '#f0f0f0', border: '1px solid #d9d9d9', borderRight: 0, borderRadius: '6px 0 0 6px' }}>深度模型</span>
+        <span style={{ lineHeight: '32px', padding: '0 12px', background: '#f0f0f0', border: '1px solid #d9d9d9', borderRight: 0, borderRadius: '6px 0 0 6px', fontSize: 12, color: '#666' }}>深度模型</span>
         <Input value={deepModel} onChange={(e) => onDeepModelChange(e.target.value)} placeholder="例如 claude-opus-4-7" style={{ flex: 1 }} />
       </Space.Compact>
       <Space>
-        <Button type="primary" onClick={save} loading={saving}>保存</Button>
-        <Button loading={testing} onClick={test}>测试连接</Button>
+        <Button type="primary" onClick={save} loading={saving} size="large">保存</Button>
+        <Button loading={testing} onClick={test} size="large">测试连接</Button>
       </Space>
       {result && <Alert type={result.ok ? 'success' : 'error'} message={result.message} showIcon />}
-    </>
+    </Space>
   );
 }

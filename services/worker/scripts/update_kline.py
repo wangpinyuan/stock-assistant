@@ -23,6 +23,70 @@ from worker import common
 
 # ==================== Fetchers ====================
 
+def fetch_sina_monthly(code: str, datalen: int = 120) -> list[dict]:
+    """Fetch monthly K-line from Sina (no auth required)."""
+    import urllib.request
+
+    market = "sh" if code.startswith(("5", "6", "9")) else "sz"
+    url = (
+        f"http://money.finance.sina.com.cn/quotes_service/api/json_v2.php"
+        f"/CN_MarketData.getKLineData?symbol={market}{code}"
+        f"&scale=4800&ma=no&datalen={datalen}"
+    )
+    try:
+        with urllib.request.urlopen(url, timeout=10) as resp:
+            raw = resp.read().decode("utf-8")
+        import json as _json
+        data = _json.loads(raw)
+        if not isinstance(data, list):
+            return []
+        rows = []
+        for item in data:
+            rows.append({
+                "trade_date": item.get("day", "")[:10],
+                "open": float(item["open"]),
+                "high": float(item["high"]),
+                "low": float(item["low"]),
+                "close": float(item["close"]),
+                "vol": float(item["volume"]),
+            })
+        return rows
+    except Exception:
+        return []
+
+
+def fetch_sina_daily(code: str, datalen: int = 1200) -> list[dict]:
+    """Fetch recent daily K-line from Sina Finance (no auth required)."""
+    import urllib.request
+
+    market = "sh" if code.startswith(("5", "6", "9")) else "sz"
+    url = (
+        f"http://money.finance.sina.com.cn/quotes_service/api/json_v2.php"
+        f"/CN_MarketData.getKLineData?symbol={market}{code}"
+        f"&scale=240&ma=no&datalen={datalen}"
+    )
+    try:
+        with urllib.request.urlopen(url, timeout=10) as resp:
+            raw = resp.read().decode("utf-8")
+        import json as _json
+        data = _json.loads(raw)
+        if not isinstance(data, list):
+            return []
+        rows = []
+        for item in data:
+            rows.append({
+                "trade_date": item.get("day", "")[:10],
+                "open": float(item["open"]),
+                "high": float(item["high"]),
+                "low": float(item["low"]),
+                "close": float(item["close"]),
+                "vol": float(item["volume"]),
+            })
+        return rows
+    except Exception:
+        return []
+
+
 def fetch_tushare_daily(code: str, start_date: str, end_date: str) -> list[dict]:
     """Fetch daily K-line from Tushare pro.daily()."""
     import tushare as ts
@@ -136,7 +200,7 @@ def upsert_daily(conn, payload: dict) -> None:
 
 
 def upsert_weekly(conn, payload: dict) -> None:
-    columns = ["code", "weekDate", "open", "high", "low", "close", "volume", "turnover", "ma5", "ma10", "ma20"]
+    columns = ["code", "weekDate", "open", "high", "low", "close", "volume", "ma5", "ma10", "ma20"]
     values = [payload.get(col) for col in columns]
     placeholders = ", ".join("?" for _ in columns)
     assignments = ", ".join(f"{col}=excluded.{col}" for col in columns if col not in ("code", "weekDate"))
@@ -148,7 +212,7 @@ def upsert_weekly(conn, payload: dict) -> None:
 
 
 def upsert_monthly(conn, payload: dict) -> None:
-    columns = ["code", "monthDate", "open", "high", "low", "close", "volume", "turnover", "ma5", "ma10", "ma20"]
+    columns = ["code", "monthDate", "open", "high", "low", "close", "volume", "ma5", "ma10", "ma20"]
     values = [payload.get(col) for col in columns]
     placeholders = ", ".join("?" for _ in columns)
     assignments = ", ".join(f"{col}=excluded.{col}" for col in columns if col not in ("code", "monthDate"))
@@ -160,8 +224,10 @@ def upsert_monthly(conn, payload: dict) -> None:
 
 
 def process_daily(conn, code: str, start_date: str, end_date: str) -> dict:
-    """Fetch and persist daily K-line with MA."""
-    rows = fetch_tushare_daily(code, start_date, end_date)
+    """Fetch and persist daily K-line with MA. Tries Sina first (free), falls back to Tushare."""
+    rows = fetch_sina_daily(code)
+    if not rows:
+        rows = fetch_tushare_daily(code, start_date, end_date)
     if not rows:
         return {"code": code, "updated": 0, "skipped": 0, "daily_rows": []}
 
@@ -181,7 +247,7 @@ def process_daily(conn, code: str, start_date: str, end_date: str) -> dict:
         mi = len(rows) - 1 - i
         payload = {
             "code": common.normalize_code(code),
-            "tradeDate": trade_date,
+            "tradeDate": f"{trade_date}T00:00:00.000Z",
             "open": common.to_decimal(row.get("open")),
             "high": common.to_decimal(row.get("high")),
             "low": common.to_decimal(row.get("low")),
@@ -224,13 +290,12 @@ def process_weekly_from_daily(conn, code: str, daily_rows: list[dict]) -> dict:
         mi = len(rows) - 1 - i
         payload = {
             "code": common.normalize_code(code),
-            "weekDate": str(week_date)[:10] if week_date else "",
+            "weekDate": f"{str(week_date)[:10]}T00:00:00.000Z",
             "open": common.to_decimal(row.get("open")),
             "high": common.to_decimal(row.get("high")),
             "low": common.to_decimal(row.get("low")),
             "close": common.to_decimal(row.get("close")),
             "volume": common.to_decimal(row.get("vol")),
-            "turnover": None,
             "ma5": ma5_vals[mi] if mi < len(ma5_vals) and ma5_vals[mi] is not None else None,
             "ma10": ma10_vals[mi] if mi < len(ma10_vals) and ma10_vals[mi] is not None else None,
             "ma20": ma20_vals[mi] if mi < len(ma20_vals) and ma20_vals[mi] is not None else None,
@@ -267,13 +332,12 @@ def process_monthly_from_daily(conn, code: str, daily_rows: list[dict]) -> dict:
         mi = len(rows) - 1 - i
         payload = {
             "code": common.normalize_code(code),
-            "monthDate": str(month_date)[:10] if month_date else "",
+            "monthDate": f"{str(month_date)[:10]}T00:00:00.000Z",
             "open": common.to_decimal(row.get("open")),
             "high": common.to_decimal(row.get("high")),
             "low": common.to_decimal(row.get("low")),
             "close": common.to_decimal(row.get("close")),
             "volume": common.to_decimal(row.get("vol")),
-            "turnover": None,
             "ma5": ma5_vals[mi] if mi < len(ma5_vals) and ma5_vals[mi] is not None else None,
             "ma10": ma10_vals[mi] if mi < len(ma10_vals) and ma10_vals[mi] is not None else None,
             "ma20": ma20_vals[mi] if mi < len(ma20_vals) and ma20_vals[mi] is not None else None,

@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useCallback } from 'react';
 import { fetchApi } from '../lib/api';
 import { useLocalStorageCache, isCacheValid } from './useLocalStorageCache';
 import type { FundFlowRow } from '@stock-assistant/shared';
@@ -21,43 +21,46 @@ const TAB_LABEL: Record<FundFlowTab, string> = {
   'sector-outflows': '板块流出前20'
 };
 
-const CACHE_TTL = 60 * 60 * 1000;
+const CACHE_TTL = 5 * 60 * 1000;
 
 export function useFundFlow() {
   const [tab, setTab] = useState<FundFlowTab>('inflows');
   const [data, setData] = useState<FundFlowRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [lastUpdateTime, setLastUpdateTime] = useState<Date | null>(null);
   const { getCached, setCached } = useLocalStorageCache();
 
-  useEffect(() => {
+  const load = useCallback(async (showLoading = true, forceRefresh = false) => {
     const cacheKey = `cache_fund_flow_${tab}`;
     const cached = getCached<{ items: FundFlowRow[] }>(cacheKey);
 
-    if (isCacheValid(cached, CACHE_TTL)) {
+    if (!forceRefresh && isCacheValid(cached, CACHE_TTL)) {
       setData(cached!.data.items);
-      setLoading(false);
+      setLastUpdateTime(new Date(cached!.timestamp));
+      if (showLoading) setLoading(false);
       return;
     }
 
-    let cancelled = false;
-    setLoading(true);
+    if (showLoading) setLoading(true);
     setError(null);
     fetchApi<{ items: FundFlowRow[] }>(TAB_TO_PATH[tab])
       .then((payload) => {
-        if (!cancelled) {
-          setData(payload.items);
-          setCached(cacheKey, payload);
-        }
+        setData(payload.items);
+        setLastUpdateTime(new Date());
+        setCached(cacheKey, payload);
       })
       .catch((err) => {
-        if (!cancelled) setError(err instanceof Error ? err.message : '加载失败');
+        setError(err instanceof Error ? err.message : '加载失败');
       })
       .finally(() => {
-        if (!cancelled) setLoading(false);
+        if (showLoading) setLoading(false);
       });
-    return () => { cancelled = true; };
   }, [tab, getCached, setCached]);
 
-  return { tab, setTab, data, loading, error, tabLabel: TAB_LABEL };
+  useEffect(() => {
+    load();
+  }, [load]);
+
+  return { tab, setTab, data, loading, error, lastUpdateTime, tabLabel: TAB_LABEL, refresh: () => load(false, true) };
 }

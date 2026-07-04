@@ -15,8 +15,8 @@ export async function stocksRoutes(app: FastifyInstance) {
 
   app.get('/:code/kline', async (request) => {
     const { code } = request.params as { code: string };
-    const { period = 'daily' } = request.query as { period?: string };
-    return getStockKline(code, period);
+    const { period = 'daily', before } = request.query as { period?: string; before?: string };
+    return getStockKline(code, period, before);
   });
 
   app.get('/:code/fund-flow', async (request) =>

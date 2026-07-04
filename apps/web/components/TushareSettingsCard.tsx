@@ -1,6 +1,6 @@
 'use client';
 
-import { Alert, Button, Input, message, Space, Typography } from 'antd';
+import { Alert, Button, Input, message, Space } from 'antd';
 import { useState } from 'react';
 import { putApi, postApi } from '../lib/api';
 
@@ -8,24 +8,22 @@ interface Props {
   token: string;
   onTokenChange: (v: string) => void;
   onSaved: () => void;
-  getToken: () => string;
 }
 
-export function TushareSettingsCard({ token, onTokenChange, onSaved, getToken }: Props) {
+export function TushareSettingsCard({ token, onTokenChange, onSaved }: Props) {
   const [saving, setSaving] = useState(false);
   const [testing, setTesting] = useState(false);
   const [result, setResult] = useState<{ ok: boolean; message: string } | null>(null);
 
   const save = async () => {
     if (!token.trim()) {
-      message.warning('请粘贴新的 Tushare Token，留空表示不修改');
+      message.warning('请粘贴新的 Tushare Token');
       return;
     }
     setSaving(true);
     try {
       await putApi('/settings', { items: [{ key: 'tushare.token', value: token.trim() }] });
       message.success('Tushare Token 已保存');
-      onTokenChange('');
       onSaved();
     } catch (err) {
       message.error(err instanceof Error ? err.message : '保存失败');
@@ -35,12 +33,11 @@ export function TushareSettingsCard({ token, onTokenChange, onSaved, getToken }:
   };
 
   const test = async () => {
-    const t = token.trim() || getToken();
-    if (!t) { message.warning('未配置 Tushare Token'); return; }
+    if (!token.trim()) { message.warning('请先输入 Tushare Token'); return; }
     setTesting(true);
     setResult(null);
     try {
-      const r = await postApi<{ ok: boolean; message: string }>('/settings/test-tushare', { token: t });
+      const r = await postApi<{ ok: boolean; message: string }>('/settings/test-tushare', { token: token.trim() });
       setResult(r);
     } catch (err) {
       setResult({ ok: false, message: err instanceof Error ? err.message : '请求失败' });
@@ -50,13 +47,18 @@ export function TushareSettingsCard({ token, onTokenChange, onSaved, getToken }:
   };
 
   return (
-    <>
-      <Input.Password value={token} onChange={(e) => onTokenChange(e.target.value)} placeholder="粘贴新 Token 以更新（留空仅测试）" />
+    <Space direction="vertical" style={{ width: '100%' }} size="middle">
+      <Input.Password
+        value={token}
+        onChange={(e) => onTokenChange(e.target.value)}
+        placeholder="粘贴新的 Tushare Token"
+        size="large"
+      />
       <Space>
-        <Button type="primary" onClick={save} disabled={!token.trim()} loading={saving}>保存</Button>
-        <Button loading={testing} onClick={test}>测试连接</Button>
+        <Button type="primary" onClick={save} loading={saving} size="large">保存</Button>
+        <Button loading={testing} onClick={test} size="large">测试连接</Button>
       </Space>
       {result && <Alert type={result.ok ? 'success' : 'error'} message={result.message} showIcon />}
-    </>
+    </Space>
   );
 }

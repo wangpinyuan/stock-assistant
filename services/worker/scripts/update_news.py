@@ -1,11 +1,10 @@
-"""Update news from East Money announcement API with stock code extraction."""
+"""Update news from AKShare with sector classification."""
 
 from __future__ import annotations
 
 import json
-import re
+import os
 import sys
-import subprocess
 from datetime import datetime
 from pathlib import Path
 
@@ -16,108 +15,70 @@ if str(WORKER_DIR) not in sys.path:
 from worker import common
 
 
-# East Money announcement API
-EAST_MONEY_NEWS_URL = (
-    "https://np-anotice-stock.eastmoney.com/api/security/ann"
-    "?sr=-1&page_size=50&page_index=1&ann_type=SHA,CYB,SZA,BEA,BJA"
-    "&client_source=web"
-)
+# Default sector keywords to search for news
+DEFAULT_SECTORS = [
+    "白酒", "半导体", "消费", "新能源", "医疗",
+    "银行", "地产", "AI", "军工", "光伏",
+    "锂电池", "汽车", "家电", "旅游", "零售"
+]
 
 
-def fetch_eastmoney_news() -> list[dict]:
-    """Fetch news from East Money announcement API."""
+def fetch_news_by_sector(sector: str) -> list[dict]:
+    """Fetch news for a specific sector using AKShare."""
+    import akshare as ak
+
     try:
-        result = subprocess.run(
-            ["curl", "-s", "--noproxy", "*", EAST_MONEY_NEWS_URL,
-             "-H", "User-Agent: Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36",
-             "-H", "Referer: https://data.eastmoney.com/",
-             "-H", "Accept: application/json"],
-            capture_output=True, text=True, timeout=30
-        )
-        data = json.loads(result.stdout)
+        df = ak.stock_news_em(symbol=sector)
+        items = []
+        for _, row in df.iterrows():
+            try:
+                title = str(row.get('新闻标题', ''))
+                if not title:
+                    continue
+
+                pub_date = str(row.get('发布时间', ''))
+                if pub_date:
+                    try:
+                        pub_date = datetime.strptime(pub_date, "%Y-%m-%d %H:%M:%S").strftime("%Y-%m-%d %H:%M:%S")
+                    except (ValueError, OSError):
+                        pub_date = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                else:
+                    pub_date = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+
+                items.append({
+                    "type": "资讯",
+                    "code": None,
+                    "title": title,
+                    "source": str(row.get('文章来源', '')) or '东方财富',
+                    "publishDate": pub_date,
+                    "url": str(row.get('新闻链接', '')) or '',
+                    "summary": str(row.get('新闻内容', ''))[:500] if row.get('新闻内容') else '',
+                    "sectors": sector,
+                })
+            except Exception as exc:
+                common.log(f"failed to parse news row: {exc}")
+                continue
+        return items
     except Exception as exc:
-        common.log(f"failed to fetch East Money news: {exc}")
+        common.log(f"fetch_news_by_sector({sector}) failed: {exc}")
         return []
 
-    items = []
-    result_data = data.get("data", [])
 
-    # Handle both list and dict formats
-    if isinstance(result_data, dict):
-        result_data = result_data.get("list", [])
+def fetch_all_news() -> list[dict]:
+    """Fetch news for all configured sectors."""
+    sectors_str = os.environ.get("NEWS_SECTORS", "").strip()
+    if sectors_str:
+        sectors = [s.strip() for s in sectors_str.split(",") if s.strip()]
+    else:
+        sectors = DEFAULT_SECTORS
 
-    for item in result_data:
-        try:
-            title = item.get("title", "") or item.get("title_ch", "")
-            if not title:
-                continue
+    all_items = []
+    for sector in sectors:
+        items = fetch_news_by_sector(sector)
+        all_items.extend(items)
+        common.log(f"fetched {len(items)} news for sector '{sector}'")
 
-            # Parse notice date
-            notice_date = item.get("notice_date", "") or ""
-            if notice_date:
-                try:
-                    pub_date = datetime.fromisoformat(notice_date.replace("Z", "+00:00")).strftime("%Y-%m-%d %H:%M:%S")
-                except (ValueError, OSError):
-                    pub_date = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-            else:
-                pub_date = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-
-            # Extract stock codes from the codes array
-            codes_info = item.get("codes", []) or []
-            code = None
-            stock_name = None
-            if codes_info:
-                first_code = codes_info[0] if isinstance(codes_info, list) else {}
-                code = common.normalize_code(first_code.get("stock_code", ""))
-                stock_name = first_code.get("short_name", "")
-
-            # Extract announcement type from column_name
-            columns = item.get("columns", []) or []
-            column_names = []
-            for col in columns:
-                if isinstance(col, dict):
-                    column_names.append(col.get("column_name", ""))
-
-            # Source is column names or "东方财富"
-            source = ",".join(column_names) if column_names else "东方财富"
-
-            # Extract URL
-            url = item.get("art_url", "") or ""
-
-            # Extract summary from title (for now, use title as summary is not available)
-            summary = ""
-
-            # Determine news type from column names
-            news_type = "公告"
-            type_keywords = {
-                "业绩": "业绩",
-                "分红": "分红",
-                "增持": "增持",
-                "减持": "减持",
-                "发行": "增发",
-                "收购": "收购",
-                "重大": "重大事项",
-            }
-            for kw, label in type_keywords.items():
-                if kw in source or kw in title:
-                    news_type = label
-                    break
-
-            items.append({
-                "type": news_type,
-                "code": code if code else None,
-                "title": title,
-                "source": source,
-                "publishDate": pub_date,
-                "url": url,
-                "summary": summary,
-                "sectors": None,  # Will be filled by impact matching
-            })
-        except Exception as exc:
-            common.log(f"failed to parse news item: {exc}")
-            continue
-
-    return items
+    return all_items
 
 
 def persist_news(items: list[dict]) -> dict:
@@ -129,6 +90,8 @@ def persist_news(items: list[dict]) -> dict:
         holding_codes = {row["code"] for row in rows}
 
     summary = {"total": 0, "inserted": 0, "skipped": 0, "impact": 0}
+    sector_stats: dict[str, int] = {}
+
     with common.connect() as conn:
         for item in items:
             if not item.get("title"):
@@ -146,50 +109,67 @@ def persist_news(items: list[dict]) -> dict:
                     summary["skipped"] += 1
                     continue
 
-            # Mark as impact if code matches a holding
+            sectors = item.get("sectors", "")
             code = item.get("code")
-            impact = 1 if code and code in holding_codes else 0
+            title = item["title"]
+
+            # Mark as impact if code matches a holding
+            impact = 1 if (code and code in holding_codes) else 0
+
+            # Track sector stats
+            if sectors:
+                sector_stats[sectors] = sector_stats.get(sectors, 0) + 1
 
             try:
                 conn.execute("""
                     INSERT INTO NewsItem (type, code, title, source, publishDate, url, summary, sentiment, impactOnHolding, sectors)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, 'neutral', ?, NULL)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, 'neutral', ?, ?)
                 """, (
                     item["type"],
                     code,
-                    item["title"],
+                    title,
                     item.get("source"),
                     item["publishDate"],
                     url,
                     item.get("summary"),
                     impact,
+                    sectors,
                 ))
                 summary["inserted"] += 1
                 if impact:
                     summary["impact"] += 1
             except Exception as exc:
-                common.log(f"failed to insert news {item.get('title', '')[:50]}: {exc}")
+                common.log(f"failed to insert news {title[:50]}: {exc}")
                 summary["skipped"] += 1
             summary["total"] += 1
 
-    return summary
+    return {**summary, "sector_stats": sector_stats}
 
 
 def main() -> int:
-    print("Fetching news from East Money...")
-    items = fetch_eastmoney_news()
-    print(f"Fetched {len(items)} news items")
+    print("Fetching news from AKShare...")
+    items = fetch_all_news()
+    print(f"Fetched {len(items)} news items total")
 
     if not items:
         print(json.dumps({"ok": True, "message": "no news fetched"}))
         return 0
 
-    # Show code distribution
-    code_count = sum(1 for item in items if item.get("code"))
-    print(f"Items with stock code: {code_count}")
+    # Deduplicate by URL
+    seen_urls = set()
+    unique_items = []
+    for item in items:
+        url = item.get("url", "")
+        if url and url in seen_urls:
+            continue
+        seen_urls.add(url)
+        unique_items.append(item)
 
-    summary = persist_news(items)
+    print(f"After deduplication: {len(unique_items)} unique items")
+
+    summary = persist_news(unique_items)
     print(f"Inserted: {summary['inserted']}, Skipped: {summary['skipped']}, Impact on holdings: {summary['impact']}")
+    print(f"Sector stats: {summary['sector_stats']}")
     summary["ok"] = True
     print(json.dumps(summary, ensure_ascii=False))
     return 0

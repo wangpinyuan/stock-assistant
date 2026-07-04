@@ -175,10 +175,16 @@ export interface BreadthStockItem {
 type BreadthType = 'limitUp' | 'limitDown' | 'strong' | 'weak';
 
 export async function getBreadthStocks(type: BreadthType, limit = 50): Promise<{ items: BreadthStockItem[] }> {
-  const latest = await prisma.quote.findFirst({ orderBy: { tradeDate: 'desc' } });
-  if (!latest) return { items: [] };
+  const dateCounts = await prisma.quote.groupBy({
+    by: ['tradeDate'],
+    _count: { id: true },
+    orderBy: { tradeDate: 'desc' },
+    take: 5
+  });
+  const validDate = dateCounts.find((d) => d._count.id >= 100)?.tradeDate ?? dateCounts[0]?.tradeDate;
+  if (!validDate) return { items: [] };
 
-  const where: Record<string, unknown> = { tradeDate: latest.tradeDate };
+  const where: Record<string, unknown> = { tradeDate: validDate };
   const orderBy: Record<string, string> = type === 'limitDown' || type === 'weak' ? { changePercent: 'asc' } : { changePercent: 'desc' };
 
   switch (type) {

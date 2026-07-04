@@ -1,7 +1,7 @@
 'use client';
 
 import { useState } from 'react';
-import { Space, Typography } from 'antd';
+import { Button, Space, Typography } from 'antd';
 import { MarketOverviewCard } from '../../components/MarketOverviewCard';
 import { FundFlowCard } from '../../components/FundFlowCard';
 import { NewsCard } from '../../components/NewsCard';
@@ -10,6 +10,7 @@ import { BreadthListModal } from '../../components/BreadthListModal';
 import { useMarketOverview } from '../../hooks/useMarketOverview';
 import { useFundFlow } from '../../hooks/useFundFlow';
 import { useNews } from '../../hooks/useNews';
+import { useRefreshInterval } from '../../hooks/useRefreshInterval';
 
 export default function MarketPage() {
   const [klineModalOpen, setKlineModalOpen] = useState(false);
@@ -20,6 +21,7 @@ export default function MarketPage() {
   const market = useMarketOverview();
   const fundFlow = useFundFlow();
   const news = useNews();
+  const { intervalMinutes } = useRefreshInterval();
 
   const handleNameClick = (code: string, name: string) => {
     setSelectedStockCode(code);
@@ -31,14 +33,24 @@ export default function MarketPage() {
     setBreadthModal({ type, label });
   };
 
+  const handleRefreshAll = () => {
+    market.refresh();
+    fundFlow.refresh();
+    news.refresh();
+  };
+
   return (
     <Space direction="vertical" size="large" style={{ width: '100%' }}>
-      <Typography.Title level={2} style={{ margin: 0 }}>市场</Typography.Title>
+      <Space style={{ width: '100%', justifyContent: 'space-between' }}>
+        <Typography.Title level={2} style={{ margin: 0 }}>市场</Typography.Title>
+        <Button onClick={handleRefreshAll}>刷新全部</Button>
+      </Space>
       <MarketOverviewCard
         data={market.data}
         loading={market.loading}
         error={market.error}
         lastUpdateTime={market.lastUpdateTime}
+        refreshIntervalMinutes={intervalMinutes}
         updating={market.updating}
         onRefresh={market.refresh}
         onNameClick={handleNameClick}
@@ -50,6 +62,8 @@ export default function MarketPage() {
         data={fundFlow.data}
         loading={fundFlow.loading}
         error={fundFlow.error}
+        lastUpdateTime={fundFlow.lastUpdateTime}
+        refreshIntervalMinutes={intervalMinutes}
         onTabChange={fundFlow.setTab}
         onNameClick={handleNameClick}
       />
@@ -58,6 +72,8 @@ export default function MarketPage() {
         data={news.data}
         loading={news.loading}
         error={news.error}
+        lastUpdateTime={news.lastUpdateTime}
+        refreshIntervalMinutes={intervalMinutes}
         onTabChange={news.setTab}
       />
       <StockKLineModal

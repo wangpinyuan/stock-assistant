@@ -156,7 +156,7 @@ def lookup_batch(codes: list[str]) -> dict:
                 market = market_prefix
 
             if market == "hk":
-                url = f"https://hq.sinajs.cn/list={normalized}"
+                url = f"https://hq.sinajs.cn/list={market_prefix}{normalized}"
             else:
                 url = f"https://hq.sinajs.cn/list={market}{normalized}"
             req = urllib.request.Request(url, headers={

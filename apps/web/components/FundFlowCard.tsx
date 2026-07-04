@@ -1,6 +1,6 @@
 'use client';
 
-import { Alert, Card, Empty, Skeleton, Table, Tabs } from 'antd';
+import { Alert, Card, Empty, Skeleton, Space, Table, Tabs, Typography } from 'antd';
 import type { ColumnsType } from 'antd/es/table';
 import { formatLargeNumber } from '@stock-assistant/shared';
 import type { FundFlowRow } from '@stock-assistant/shared';
@@ -13,6 +13,8 @@ interface Props {
   data: FundFlowRow[];
   loading: boolean;
   error: string | null;
+  lastUpdateTime: Date | null;
+  refreshIntervalMinutes: number;
   onTabChange: (tab: FundFlowTab) => void;
   onNameClick: (code: string, name: string) => void;
 }
@@ -37,9 +39,13 @@ const columns = (onNameClick: (code: string, name: string) => void): ColumnsType
   { title: '涨跌幅', dataIndex: 'changePercent', align: 'right', width: 100, render: (v: number | null) => (v == null ? '-' : <ProfitText value={v} suffix="%" />) }
 ];
 
-export function FundFlowCard({ tab, tabs, data, loading, error, onTabChange, onNameClick }: Props) {
+export function FundFlowCard({ tab, tabs, data, loading, error, lastUpdateTime, refreshIntervalMinutes, onTabChange, onNameClick }: Props) {
+  const lastUpdateText = lastUpdateTime ? `更新时间：${lastUpdateTime.toLocaleTimeString()}` : '数据加载中...';
   return (
-    <Card title="资金流">
+    <Card
+      title="资金流"
+      extra={<Space size="small"><Typography.Text type="secondary" style={{ fontSize: 12 }}>{lastUpdateText}</Typography.Text><Typography.Text type="secondary" style={{ fontSize: 12 }}>每{refreshIntervalMinutes}分钟自动更新</Typography.Text></Space>}
+    >
       <Tabs
         size="small"
         activeKey={tab}

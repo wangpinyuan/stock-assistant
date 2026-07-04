@@ -1,25 +1,21 @@
 'use client';
 
 import { useState } from 'react';
-import { Button, DatePicker, Form, Input, InputNumber, message, Modal, Popconfirm, Select, Table, Typography } from 'antd';
+import { Button, DatePicker, Form, Input, InputNumber, message, Modal, Table, Typography } from 'antd';
 import type { ColumnsType } from 'antd/es/table';
 import dayjs, { type Dayjs } from 'dayjs';
 import { fetchApi, postApi, putApi, deleteApi } from '../lib/api';
 import { ProfitText } from './ProfitText';
 import { KLineChart } from './KLineChart';
-import type { AssetType, HoldingView } from '@stock-assistant/shared';
+import type { HoldingView } from '@stock-assistant/shared';
 
 const percent = (value: number) => `${(value * 100).toFixed(2)}%`;
 
 interface HoldingFormValues {
   code: string;
-  name?: string;
-  assetType: AssetType;
   quantity: number;
   averageCost: number;
   buyDate: Dayjs | null;
-  tags?: string;
-  note?: string;
 }
 
 interface HoldingsTableProps {
@@ -41,7 +37,7 @@ export function HoldingsTable({ holdings, loading, onReload }: HoldingsTableProp
   const openCreate = () => {
     setEditingHolding(null);
     form.resetFields();
-    form.setFieldsValue({ assetType: 'stock', buyDate: null });
+    form.setFieldsValue({ buyDate: null });
     setModalOpen(true);
   };
 
@@ -49,13 +45,9 @@ export function HoldingsTable({ holdings, loading, onReload }: HoldingsTableProp
     setEditingHolding(row);
     form.setFieldsValue({
       code: row.code,
-      name: row.name,
-      assetType: row.assetType,
       quantity: row.quantity,
       averageCost: row.averageCost,
-      buyDate: null,
-      tags: row.tags ?? undefined,
-      note: row.note ?? undefined
+      buyDate: null
     });
     setModalOpen(true);
   };
@@ -64,20 +56,26 @@ export function HoldingsTable({ holdings, loading, onReload }: HoldingsTableProp
     const values = await form.validateFields();
     setSaving(true);
     try {
-      const payload = {
-        code: values.code.trim(),
-        quantity: values.quantity,
-        averageCost: values.averageCost,
-        assetType: values.assetType,
-        buyDate: values.buyDate ? values.buyDate.format('YYYY-MM-DD') : null,
-        tags: values.tags?.trim() || null,
-        note: values.note?.trim() || null
-      };
       if (editingHolding) {
-        await putApi(`/holdings/${editingHolding.id}`, payload);
+        await putApi(`/holdings/${editingHolding.id}`, {
+          code: editingHolding.code,
+          quantity: values.quantity,
+          averageCost: values.averageCost,
+          buyDate: values.buyDate ? values.buyDate.format('YYYY-MM-DD') : null,
+          assetType: editingHolding.assetType,
+          tags: editingHolding.tags ?? null,
+          note: editingHolding.note ?? null
+        });
         message.success('已更新');
       } else {
-        await postApi('/holdings', { ...payload, name: values.name?.trim() || values.code.trim() });
+        await postApi('/holdings', {
+          code: values.code.trim(),
+          quantity: values.quantity,
+          averageCost: values.averageCost,
+          buyDate: values.buyDate ? values.buyDate.format('YYYY-MM-DD') : null,
+          assetType: 'stock',
+          name: values.code.trim()
+        });
         message.success('已新增');
       }
       setModalOpen(false);
@@ -114,7 +112,6 @@ export function HoldingsTable({ holdings, loading, onReload }: HoldingsTableProp
       )
     },
     { title: '代码', dataIndex: 'code', width: 90 },
-    { title: '类型', dataIndex: 'assetType', width: 90, render: (value: AssetType) => (value === 'stock' ? '股票' : 'ETF') },
     { title: '当前价', dataIndex: 'currentPrice', align: 'right', width: 90, render: (v: number) => v.toFixed(2) },
     { title: '涨跌幅', dataIndex: 'changePercent', align: 'right', width: 90, render: (v: number) => <ProfitText value={v} suffix="%" /> },
     { title: '持仓数量', dataIndex: 'quantity', align: 'right', width: 90 },
@@ -128,7 +125,7 @@ export function HoldingsTable({ holdings, loading, onReload }: HoldingsTableProp
       key: 'actions',
       width: 90,
       render: (_, row) => (
-        <Button size="small" onClick={() => openEdit(row)}>编辑</Button>
+        <Button size="small" onClick={(e) => { e.stopPropagation(); openEdit(row); }}>编辑</Button>
       )
     }
   ];
@@ -163,25 +160,11 @@ export function HoldingsTable({ holdings, loading, onReload }: HoldingsTableProp
         onCancel={() => setModalOpen(false)}
         onOk={submit}
         confirmLoading={saving}
-        width={520}
+        width={400}
       >
         <Form form={form} layout="vertical" preserve={false}>
           <Form.Item label="股票代码" name="code" rules={[{ required: true, message: '请输入代码' }, { max: 20 }]}>
             <Input placeholder="例如 600519" disabled={Boolean(editingHolding)} />
-          </Form.Item>
-          {!editingHolding && (
-            <Form.Item label="股票名称" name="name" rules={[{ max: 50 }]}>
-              <Input placeholder="可选，未填将使用代码" />
-            </Form.Item>
-          )}
-          <Form.Item label="资产类型" name="assetType" rules={[{ required: true }]}>
-            <Select
-              disabled={Boolean(editingHolding)}
-              options={[
-                { value: 'stock', label: '股票' },
-                { value: 'etf', label: 'ETF' }
-              ]}
-            />
           </Form.Item>
           <Form.Item label="持仓数量" name="quantity" rules={[{ required: true, message: '请输入数量' }]}>
             <InputNumber min={0} style={{ width: '100%' }} />
@@ -191,12 +174,6 @@ export function HoldingsTable({ holdings, loading, onReload }: HoldingsTableProp
           </Form.Item>
           <Form.Item label="买入日期" name="buyDate">
             <DatePicker style={{ width: '100%' }} />
-          </Form.Item>
-          <Form.Item label="标签" name="tags">
-            <Input placeholder="例如 核心观察 / 新能源" maxLength={200} />
-          </Form.Item>
-          <Form.Item label="备注" name="note">
-            <Input.TextArea rows={3} maxLength={1000} placeholder="可选备注" />
           </Form.Item>
         </Form>
       </Modal>

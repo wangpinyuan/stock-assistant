@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect, useState } from 'react';
+import { useParams } from 'next/navigation';
 import { Alert, Card, Col, Descriptions, Row, Space, Spin, Table, Tabs, Tag, Typography } from 'antd';
 import { KLineChart } from '../../../components/KLineChart';
 import { ProfitText } from '../../../components/ProfitText';
@@ -18,8 +19,8 @@ function toneColor(tone: StockAnalysisSignal['tone']): string {
   return 'default';
 }
 
-export default function StockDetailPage({ params }: { params: { code: string } }) {
-  const { code } = params;
+export default function StockDetailPage() {
+  const { code } = useParams<{ code: string }>();
   const [quote, setQuote] = useState<StockQuoteView | null>(null);
   const [signalData, setSignalData] = useState<StockSignalResponse | null>(null);
   const [news, setNews] = useState<NewsItemView[]>([]);

@@ -13,12 +13,18 @@ export async function getStockQuote(code: string) {
   });
 }
 
-export async function getStockKline(code: string, period: string) {
+export async function getStockKline(code: string, period: string, before?: string) {
   if (period === 'weekly') {
+    if (before) {
+      return { items: await prisma.$queryRaw`SELECT * FROM KlineWeekly WHERE code = ${code} AND weekDate < ${before} ORDER BY weekDate ASC` };
+    }
     return { items: await prisma.klineWeekly.findMany({ where: { code }, orderBy: { weekDate: 'asc' } }) };
   }
 
   if (period === 'monthly') {
+    if (before) {
+      return { items: await prisma.$queryRaw`SELECT * FROM KlineMonthly WHERE code = ${code} AND monthDate < ${before} ORDER BY monthDate ASC` };
+    }
     return { items: await prisma.klineMonthly.findMany({ where: { code }, orderBy: { monthDate: 'asc' } }) };
   }
 
@@ -26,6 +32,9 @@ export async function getStockKline(code: string, period: string) {
     return { items: await prisma.intradayQuote.findMany({ where: { code }, orderBy: [{ tradeDate: 'asc' }, { time: 'asc' }] }) };
   }
 
+  if (before) {
+    return { items: await prisma.$queryRaw`SELECT * FROM KlineDaily WHERE code = ${code} AND tradeDate < ${before} ORDER BY tradeDate ASC` };
+  }
   return { items: await prisma.klineDaily.findMany({ where: { code }, orderBy: { tradeDate: 'asc' } }) };
 }
 

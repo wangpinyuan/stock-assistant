@@ -11,6 +11,7 @@ interface Props {
   loading: boolean;
   error: string | null;
   lastUpdateTime: Date | null;
+  refreshIntervalMinutes: number;
   updating: boolean;
   onRefresh: () => void;
   onNameClick: (code: string, name: string) => void;
@@ -23,7 +24,7 @@ const indexColumns = (onNameClick: (code: string, name: string) => void): Column
   { title: '涨跌幅', dataIndex: 'changePercent', align: 'right', width: 150, render: (v: number | null) => (v == null ? '-' : <ProfitText value={v} suffix="%" />) }
 ];
 
-export function MarketOverviewCard({ data, loading, error, lastUpdateTime, updating, onRefresh, onNameClick, onBreadthClick }: Props) {
+export function MarketOverviewCard({ data, loading, error, lastUpdateTime, refreshIntervalMinutes, updating, onRefresh, onNameClick, onBreadthClick }: Props) {
   if (loading) return <Skeleton active />;
   if (error) return <Alert type="error" message="市场数据加载失败" description={error} />;
   if (!data) return null;
@@ -45,7 +46,7 @@ export function MarketOverviewCard({ data, loading, error, lastUpdateTime, updat
           extra={
             <Space size="small">
               <Typography.Text type="secondary" style={{ fontSize: 12 }}>{lastUpdateText}</Typography.Text>
-              <Typography.Text type="secondary" style={{ fontSize: 12 }}>每30分钟自动更新</Typography.Text>
+              <Typography.Text type="secondary" style={{ fontSize: 12 }}>每{refreshIntervalMinutes}分钟自动更新</Typography.Text>
             </Space>
           }
           style={{ height: '100%' }}
@@ -97,7 +98,16 @@ export function MarketOverviewCard({ data, loading, error, lastUpdateTime, updat
         </Card>
       </Col>
       <Col xs={24} md={12}>
-        <Card title="主要指数" style={{ height: '100%' }}>
+        <Card
+          title="主要指数"
+          style={{ height: '100%' }}
+          extra={
+            <Space size="small">
+              <Typography.Text type="secondary" style={{ fontSize: 12 }}>{lastUpdateText}</Typography.Text>
+              <Typography.Text type="secondary" style={{ fontSize: 12 }}>每{refreshIntervalMinutes}分钟自动更新</Typography.Text>
+            </Space>
+          }
+        >
           <Table rowKey="code" dataSource={data.indexes} pagination={false} size="small" columns={indexColumns(onNameClick)} />
         </Card>
       </Col>

@@ -11,6 +11,7 @@ export interface NewsRow {
   summary: string | null;
   sentiment: string;
   impactOnHolding: boolean;
+  sectors: string | null;
 }
 
 export interface FundFlowRow {
@@ -35,6 +36,7 @@ export function toNewsRow(record: {
   summary: string | null;
   sentiment: string;
   impactOnHolding: boolean;
+  sectors: string | null;
 }): NewsRow {
   return {
     id: record.id,
@@ -46,7 +48,8 @@ export function toNewsRow(record: {
     url: record.url,
     summary: record.summary,
     sentiment: record.sentiment,
-    impactOnHolding: record.impactOnHolding
+    impactOnHolding: record.impactOnHolding,
+    sectors: record.sectors
   };
 }
 

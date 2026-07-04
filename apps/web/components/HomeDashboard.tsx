@@ -16,6 +16,12 @@ export function HomeDashboard() {
   const [loading, setLoading] = useState(true);
   const [holdingsLoading, setHoldingsLoading] = useState(false);
   const [watchlistLoading, setWatchlistLoading] = useState(false);
+  const [activeTab, setActiveTab] = useState('holdings');
+
+  const loadSummary = useCallback(async () => {
+    const data = await fetchApi<PortfolioSummaryType>('/portfolio/summary');
+    setSummary(data);
+  }, []);
 
   const loadHoldings = useCallback(async () => {
     setHoldingsLoading(true);
@@ -37,35 +43,29 @@ export function HomeDashboard() {
     }
   }, []);
 
-  useEffect(() => {
-    Promise.all([
-      fetchApi<PortfolioSummaryType>('/portfolio/summary'),
-      fetchApi<{ items: HoldingView[] }>('/holdings'),
-      fetchApi<{ items: WatchlistView[] }>('/watchlist')
-    ])
-      .then(([summaryData, holdingsData, watchlistData]) => {
-        setSummary(summaryData);
-        setHoldings(holdingsData.items);
-        setWatchlist(watchlistData.items);
-      })
-      .catch((requestError: unknown) => {
-        setError(requestError instanceof Error ? requestError.message : '数据加载失败');
-      })
-      .finally(() => setLoading(false));
-  }, []);
-
-  const tabItems = [
-    {
-      key: 'holdings',
-      label: '持仓',
-      children: <HoldingsTable holdings={holdings} loading={holdingsLoading} onReload={loadHoldings} />
-    },
-    {
-      key: 'watchlist',
-      label: '自选',
-      children: <WatchlistTable watchlist={watchlist} loading={watchlistLoading} onReload={loadWatchlist} />
+  const loadAll = useCallback(async () => {
+    setLoading(true);
+    try {
+      await Promise.all([loadSummary(), loadHoldings(), loadWatchlist()]);
+    } catch (requestError: unknown) {
+      setError(requestError instanceof Error ? requestError.message : '数据加载失败');
+    } finally {
+      setLoading(false);
     }
-  ];
+  }, [loadSummary, loadHoldings, loadWatchlist]);
+
+  useEffect(() => {
+    loadAll();
+  }, [loadAll]);
+
+  const handleTabChange = (key: string) => {
+    setActiveTab(key);
+    if (key === 'holdings') {
+      loadHoldings();
+    } else if (key === 'watchlist') {
+      loadWatchlist();
+    }
+  };
 
   if (loading) {
     return <Spin />;
@@ -78,7 +78,18 @@ export function HomeDashboard() {
   return (
     <Space direction="vertical" size="large" style={{ width: '100%' }}>
       <PortfolioSummary summary={summary} />
-      <Tabs items={tabItems} />
+      <Tabs activeKey={activeTab} onChange={handleTabChange} items={[
+        {
+          key: 'holdings',
+          label: '持仓',
+          children: <HoldingsTable holdings={holdings} loading={holdingsLoading} onReload={loadHoldings} />
+        },
+        {
+          key: 'watchlist',
+          label: '自选',
+          children: <WatchlistTable watchlist={watchlist} loading={watchlistLoading} onReload={loadWatchlist} />
+        }
+      ]} />
     </Space>
   );
 }
