@@ -1,0 +1,11 @@
+node_modules
+.git
+.env
+.env.*
+!.env.example
+data/*.db
+data/*.db.backup
+*.log
+.DS_Store
+.claude
+.vscode
