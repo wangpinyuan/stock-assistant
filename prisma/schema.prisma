@@ -224,6 +224,7 @@ model NewsItem {
   sentiment       String    @default("neutral")
   impactOnHolding Boolean   @default(false)
   impactSummary   String?
+  sectors         String?
   rawJson         String?
 
   createdAt DateTime @default(now())
@@ -235,6 +236,7 @@ model NewsItem {
   @@index([publishDate])
   @@index([sentiment])
   @@index([impactOnHolding])
+  @@index([sectors])
 }
 
 model AiReport {

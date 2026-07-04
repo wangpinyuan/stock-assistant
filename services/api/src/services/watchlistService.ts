@@ -1,30 +1,6 @@
 import { prisma } from '../plugins/prisma';
-import { execSync } from 'child_process';
-import { resolve, dirname } from 'path';
-import { fileURLToPath } from 'url';
-import { toNumberOrNull, isValidStockCode } from '@stock-assistant/shared';
-
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = dirname(__filename);
-
-function lookupStockFromAkShare(code: string): { name: string | null; assetType: 'stock' | 'etf'; currentPrice?: number; changePercent?: number } {
-  // Validate stock code format to prevent command injection
-  if (!isValidStockCode(code)) {
-    return { name: null, assetType: 'stock' };
-  }
-  try {
-    const scriptsDir = resolve(__dirname, '..', '..', '..', 'worker', 'scripts');
-    const result = execSync(`python3 "${scriptsDir}/lookup_stock.py" "${code}"`, {
-      timeout: 15000,
-      encoding: 'utf-8'
-    });
-    const data = JSON.parse(result) as { ok: boolean; name?: string; price?: number; pct?: number; error?: string };
-    if (!data.ok) return { name: null, assetType: 'stock' };
-    return { name: data.name ?? null, assetType: 'stock', currentPrice: data.price, changePercent: data.pct };
-  } catch {
-    return { name: null, assetType: 'stock' };
-  }
-}
+import { toNumberOrNull } from '@stock-assistant/shared';
+import { lookupStock, ensureStockExists } from '../utils/stockLookup';
 
 export async function getWatchlist() {
   const items = await prisma.watchlistItem.findMany({
@@ -71,14 +47,6 @@ export interface WatchlistInput {
   note?: string | null;
 }
 
-async function ensureStock(code: string, name: string, assetType: 'stock' | 'etf' = 'stock') {
-  return prisma.stock.upsert({
-    where: { code },
-    create: { code, name, assetType, market: 'A股' },
-    update: {}
-  });
-}
-
 export async function createWatchlistItem(input: WatchlistInput) {
   const stock = await prisma.stock.findUnique({ where: { code: input.code } });
   let name: string | null | undefined = input.name?.trim();
@@ -86,7 +54,7 @@ export async function createWatchlistItem(input: WatchlistInput) {
   let quoteData: { currentPrice?: number; changePercent?: number } = {};
 
   if (!name) {
-    const looked = lookupStockFromAkShare(input.code);
+    const looked = lookupStock(input.code);
     name = looked.name;
     assetType = looked.assetType;
     quoteData = { currentPrice: looked.currentPrice, changePercent: looked.changePercent };
@@ -94,14 +62,13 @@ export async function createWatchlistItem(input: WatchlistInput) {
 
   name = name || input.code;
 
-  await ensureStock(input.code, name, assetType);
+  await ensureStockExists(prisma, input.code, name, assetType);
 
   const existing = await prisma.watchlistItem.findUnique({ where: { code: input.code } });
   if (existing) {
     return { id: existing.id, duplicate: true };
   }
 
-  // Get max sortOrder and add 1
   const maxOrder = await prisma.watchlistItem.aggregate({ _max: { sortOrder: true } });
   const sortOrder = input.sortOrder ?? ((maxOrder._max.sortOrder ?? 0) + 1);
 
@@ -114,7 +81,6 @@ export async function createWatchlistItem(input: WatchlistInput) {
     }
   });
 
-  // Fetch and save quote data if we have it
   if (quoteData.currentPrice != null) {
     const today = new Date();
     today.setHours(0, 0, 0, 0);

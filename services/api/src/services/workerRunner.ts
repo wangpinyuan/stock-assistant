@@ -1,11 +1,9 @@
 import { spawn } from 'node:child_process';
-import { dirname, resolve } from 'node:path';
-import { fileURLToPath } from 'node:url';
+import { resolve } from 'node:path';
 
-const servicesApiDir = resolve(dirname(fileURLToPath(import.meta.url)), '..', '..', '..');
-const workerDir = resolve(servicesApiDir, '..', 'worker');
+const projectRoot = process.cwd();
+const workerDir = resolve(projectRoot, 'services', 'worker');
 const scriptsDir = resolve(workerDir, 'scripts');
-const projectRoot = resolve(servicesApiDir, '..', '..');
 
 export interface WorkerOptions {
   script: string;
@@ -27,7 +25,10 @@ export interface WorkerResult {
 const DEFAULT_TIMEOUT_MS = 60_000;
 
 function resolveInterpreter(): string {
-  return process.env.WORKER_PYTHON?.trim() || (process.platform === 'win32' ? 'python' : 'python3');
+  if (process.env.WORKER_PYTHON?.trim()) return process.env.WORKER_PYTHON.trim();
+  if (process.platform === 'win32') return 'python';
+  // Default to /usr/bin/python3 to avoid PATH issues in spawned processes
+  return '/usr/bin/python3';
 }
 
 export async function runWorker(options: WorkerOptions): Promise<WorkerResult> {
@@ -50,10 +51,12 @@ export async function runWorker(options: WorkerOptions): Promise<WorkerResult> {
 
   return new Promise<WorkerResult>((resolvePromise) => {
     const start = Date.now();
+    console.error(`[workerRunner] spawning: ${interpreter} ${scriptPath} ${args.join(' ')}`);
     const child = spawn(interpreter, [scriptPath, ...args], {
       cwd: workerDir,
       env,
-      stdio: ['ignore', 'pipe', 'pipe']
+      stdio: ['ignore', 'pipe', 'pipe'],
+      shell: false
     });
 
     let stdout = '';
@@ -72,8 +75,9 @@ export async function runWorker(options: WorkerOptions): Promise<WorkerResult> {
       stderr += chunk.toString('utf8');
     });
 
-    child.on('error', (error) => {
+    child.on('error', (error: Error & { errno?: number; code?: string; path?: string }) => {
       clearTimeout(timer);
+      console.error(`[workerRunner] spawn error: ${error.message}`, { interpreter, scriptPath, args, errno: error.errno, code: error.code, path: error.path });
       resolvePromise({
         ok: false,
         exitCode: null,

@@ -1,44 +1,7 @@
 import { prisma } from '../plugins/prisma';
-import { toNumberOrNull } from '@stock-assistant/shared';
+import { toNewsRow, NewsRow } from '../utils/transform';
 
-export interface NewsRow {
-  id: number;
-  type: string;
-  code: string | null;
-  title: string;
-  source: string | null;
-  publishDate: string;
-  url: string | null;
-  summary: string | null;
-  sentiment: string;
-  impactOnHolding: boolean;
-}
-
-function toRow(record: {
-  id: number;
-  type: string;
-  code: string | null;
-  title: string;
-  source: string | null;
-  publishDate: Date;
-  url: string | null;
-  summary: string | null;
-  sentiment: string;
-  impactOnHolding: boolean;
-}): NewsRow {
-  return {
-    id: record.id,
-    type: record.type,
-    code: record.code,
-    title: record.title,
-    source: record.source,
-    publishDate: record.publishDate.toISOString(),
-    url: record.url,
-    summary: record.summary,
-    sentiment: record.sentiment,
-    impactOnHolding: record.impactOnHolding
-  };
-}
+export type { NewsRow } from '../utils/transform';
 
 export async function listNews(filter: { type?: string; limit?: number } = {}) {
   const items = await prisma.newsItem.findMany({
@@ -46,7 +9,7 @@ export async function listNews(filter: { type?: string; limit?: number } = {}) {
     orderBy: { publishDate: 'desc' },
     take: filter.limit ?? 100
   });
-  return { items: items.map(toRow) };
+  return { items: items.map(toNewsRow) };
 }
 
 export async function getHoldingsImpactNews(limit = 50) {
@@ -58,7 +21,7 @@ export async function getHoldingsImpactNews(limit = 50) {
     orderBy: { publishDate: 'desc' },
     take: limit
   });
-  return { items: items.map(toRow) };
+  return { items: items.map(toNewsRow) };
 }
 
 export async function getStockNews(code: string, limit = 50) {
@@ -67,7 +30,7 @@ export async function getStockNews(code: string, limit = 50) {
     orderBy: { publishDate: 'desc' },
     take: limit
   });
-  return { items: items.map(toRow) };
+  return { items: items.map(toNewsRow) };
 }
 
 export async function getNewsTypes() {

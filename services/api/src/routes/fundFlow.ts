@@ -11,6 +11,7 @@ import {
 export async function fundFlowRoutes(app: FastifyInstance) {
   app.get('/market', async () => getMarketFundFlow());
   app.get('/sectors', async () => getSectorFundFlow());
+  app.get('/sector-outflows', async () => getFundFlowByLevel('sector_outflow'));
   app.get('/stocks/:code', async (request) =>
     getStockFundFlow((request.params as { code: string }).code)
   );

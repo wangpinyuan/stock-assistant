@@ -83,15 +83,27 @@ export function WatchlistTable({ watchlist, loading, onReload }: WatchlistTableP
   };
 
   const columns: ColumnsType<WatchlistView> = [
-    { title: '代码', dataIndex: 'code' },
-    { title: '名称', dataIndex: 'name' },
-    { title: '当前价', dataIndex: 'currentPrice', align: 'right', render: (v: number | null) => v?.toFixed(2) ?? '-' },
-    { title: '涨跌额', dataIndex: 'changeAmount', align: 'right', render: (v: number | null) => (v == null ? '-' : <ProfitText value={v} />) },
-    { title: '涨跌幅', dataIndex: 'changePercent', align: 'right', render: (v: number | null) => (v == null ? '-' : <ProfitText value={v} suffix="%" />) },
+    { title: '代码', dataIndex: 'code', width: 100 },
+    {
+      title: '名称',
+      dataIndex: 'name',
+      width: 100,
+      render: (v: string, row) => (
+        <span
+          style={{ color: '#1677ff', cursor: 'pointer' }}
+          onClick={(e) => { e.stopPropagation(); setSelectedStockCode(row.code); setSelectedStockName(v); setKlineModalOpen(true); }}
+        >
+          {v}
+        </span>
+      )
+    },
+    { title: '当前价', dataIndex: 'currentPrice', align: 'right', width: 100, render: (v: number | null) => v?.toFixed(2) ?? '-' },
+    { title: '涨跌额', dataIndex: 'changeAmount', align: 'right', width: 100, render: (v: number | null) => (v == null ? '-' : <ProfitText value={v} />) },
+    { title: '涨跌幅', dataIndex: 'changePercent', align: 'right', width: 100, render: (v: number | null) => (v == null ? '-' : <ProfitText value={v} suffix="%" />) },
     {
       title: '操作',
       key: 'actions',
-      width: 160,
+      width: 100,
       render: (_, row) => (
         <Button size="small" onClick={() => openEdit(row)}>编辑</Button>
       )

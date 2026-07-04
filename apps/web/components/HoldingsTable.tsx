@@ -100,21 +100,33 @@ export function HoldingsTable({ holdings, loading, onReload }: HoldingsTableProp
   };
 
   const columns: ColumnsType<HoldingView> = [
-    { title: '名称', dataIndex: 'name' },
-    { title: '代码', dataIndex: 'code' },
-    { title: '类型', dataIndex: 'assetType', render: (value: AssetType) => (value === 'stock' ? '股票' : 'ETF') },
-    { title: '当前价', dataIndex: 'currentPrice', align: 'right', render: (v: number) => v.toFixed(2) },
-    { title: '涨跌幅', dataIndex: 'changePercent', align: 'right', render: (v: number) => <ProfitText value={v} suffix="%" /> },
-    { title: '持仓数量', dataIndex: 'quantity', align: 'right' },
-    { title: '平均成本', dataIndex: 'averageCost', align: 'right', render: (v: number) => v.toFixed(2) },
-    { title: '当前市值', dataIndex: 'marketValue', align: 'right', render: (v: number) => v.toFixed(2) },
-    { title: '权重', dataIndex: 'weight', align: 'right', render: percent },
-    { title: '今日盈亏', dataIndex: 'todayProfit', align: 'right', render: (v: number) => <ProfitText value={v} /> },
-    { title: '总盈亏', dataIndex: 'totalProfit', align: 'right', render: (v: number) => <ProfitText value={v} /> },
+    {
+      title: '名称',
+      dataIndex: 'name',
+      width: 90,
+      render: (v: string, row) => (
+        <span
+          style={{ color: '#1677ff', cursor: 'pointer' }}
+          onClick={(e) => { e.stopPropagation(); setSelectedStockCode(row.code); setSelectedStockName(v); setKlineModalOpen(true); }}
+        >
+          {v}
+        </span>
+      )
+    },
+    { title: '代码', dataIndex: 'code', width: 90 },
+    { title: '类型', dataIndex: 'assetType', width: 90, render: (value: AssetType) => (value === 'stock' ? '股票' : 'ETF') },
+    { title: '当前价', dataIndex: 'currentPrice', align: 'right', width: 90, render: (v: number) => v.toFixed(2) },
+    { title: '涨跌幅', dataIndex: 'changePercent', align: 'right', width: 90, render: (v: number) => <ProfitText value={v} suffix="%" /> },
+    { title: '持仓数量', dataIndex: 'quantity', align: 'right', width: 90 },
+    { title: '平均成本', dataIndex: 'averageCost', align: 'right', width: 90, render: (v: number) => v.toFixed(2) },
+    { title: '当前市值', dataIndex: 'marketValue', align: 'right', width: 90, render: (v: number) => v.toFixed(2) },
+    { title: '权重', dataIndex: 'weight', align: 'right', width: 90, render: percent },
+    { title: '今日盈亏', dataIndex: 'todayProfit', align: 'right', width: 90, render: (v: number) => <ProfitText value={v} /> },
+    { title: '总盈亏', dataIndex: 'totalProfit', align: 'right', width: 90, render: (v: number) => <ProfitText value={v} /> },
     {
       title: '操作',
       key: 'actions',
-      width: 160,
+      width: 90,
       render: (_, row) => (
         <Button size="small" onClick={() => openEdit(row)}>编辑</Button>
       )

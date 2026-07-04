@@ -2,11 +2,11 @@ import type { FastifyInstance } from 'fastify';
 import {
   getStockAnalysisSignals,
   getStockDetail,
-  getStockFundFlow,
   getStockKline,
-  getStockNews,
   getStockQuote
 } from '../services/stockService';
+import { getStockNews } from '../services/newsService';
+import { getFundFlowByLevel } from '../services/fundFlowService';
 
 export async function stocksRoutes(app: FastifyInstance) {
   app.get('/:code', async (request) => getStockDetail((request.params as { code: string }).code));
@@ -20,7 +20,7 @@ export async function stocksRoutes(app: FastifyInstance) {
   });
 
   app.get('/:code/fund-flow', async (request) =>
-    getStockFundFlow((request.params as { code: string }).code)
+    getFundFlowByLevel('stock', 30)
   );
 
   app.get('/:code/news', async (request) => getStockNews((request.params as { code: string }).code));

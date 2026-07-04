@@ -31,12 +31,13 @@ export default function StockDetailPage({ params }: { params: { code: string } }
     let cancelled = false;
     setLoading(true);
     setError(null);
-    Promise.all([
-      fetchApi<StockQuoteView | null>(`/stocks/${code}/quote`).catch(() => null),
-      fetchApi<StockSignalResponse>(`/stocks/${code}/analysis-signals`).catch(() => null),
-      fetchApi<{ items: NewsItemView[] }>(`/stocks/${code}/news`).catch(() => ({ items: [] })),
-      fetchApi<{ items: HoldingView[] }>('/holdings').catch(() => ({ items: [] }))
-    ])
+
+    const quotePromise = fetchApi<StockQuoteView | null>(`/stocks/${code}/quote`);
+    const signalsPromise = fetchApi<StockSignalResponse>(`/stocks/${code}/analysis-signals`);
+    const newsPromise = fetchApi<{ items: NewsItemView[] }>(`/stocks/${code}/news`);
+    const holdingsPromise = fetchApi<{ items: HoldingView[] }>('/holdings');
+
+    Promise.all([quotePromise, signalsPromise, newsPromise, holdingsPromise])
       .then(([quoteData, signalPayload, newsPayload, holdingsPayload]) => {
         if (cancelled) return;
         setQuote(quoteData);
@@ -45,11 +46,13 @@ export default function StockDetailPage({ params }: { params: { code: string } }
         setHoldings(holdingsPayload.items.filter((item) => item.code === code));
       })
       .catch((err) => {
-        if (!cancelled) setError(err instanceof Error ? err.message : '加载失败');
+        if (cancelled) return;
+        setError(err instanceof Error ? err.message : '加载失败');
       })
       .finally(() => {
         if (!cancelled) setLoading(false);
       });
+
     return () => {
       cancelled = true;
     };

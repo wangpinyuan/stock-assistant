@@ -24,22 +24,25 @@ from worker import common
 
 def fetch_concept_board_flow() -> list[dict]:
     """Fetch concept board (theme sector) fund flow from East Money API."""
+    import subprocess
     # East Money concept board API - sorted by net inflow (f62)
+    # Use push2delay.eastmoney.com to avoid connection issues
     url = (
-        "https://push2.eastmoney.com/api/qt/clist/get"
+        "https://push2delay.eastmoney.com/api/qt/clist/get"
         "?pn=1&pz=100&po=1&np=1"
         "&ut=bd1d9ddb04089700cf9c27f6f7426281"
         "&fltt=2&invt=2&fid=f62"
         "&fs=m:90+t:3+f:!50"
         "&fields=f12,f14,f62,f184,f3,f66"
     )
-    req = urllib.request.Request(url, headers={
-        "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36",
-        "Referer": "https://quote.eastmoney.com/"
-    })
     try:
-        with urllib.request.urlopen(req, timeout=20) as resp:
-            data = json.loads(resp.read().decode())
+        result = subprocess.run(
+            ["curl", "-s", "--noproxy", "*", url,
+             "-H", "User-Agent: Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36",
+             "-H", "Referer: https://quote.eastmoney.com/"],
+            capture_output=True, text=True, timeout=20
+        )
+        data = json.loads(result.stdout)
         diff = data.get("data", {}).get("diff", [])
         results = []
         for item in diff:
@@ -57,6 +60,50 @@ def fetch_concept_board_flow() -> list[dict]:
         return results
     except Exception as exc:
         common.log(f"fetch_concept_board_flow failed: {exc}")
+        return []
+
+
+def fetch_concept_board_outflows() -> list[dict]:
+    """Fetch concept board (theme sector) fund outflows - sorted by negative net inflow."""
+    import subprocess
+    # East Money concept board API - sorted by net inflow ascending (po=0 for ascending)
+    # Use push2delay.eastmoney.com to avoid connection issues
+    url = (
+        "https://push2delay.eastmoney.com/api/qt/clist/get"
+        "?pn=1&pz=100&po=0&np=1"
+        "&ut=bd1d9ddb04089700cf9c27f6f7426281"
+        "&fltt=2&invt=2&fid=f62"
+        "&fs=m:90+t:3+f:!50"
+        "&fields=f12,f14,f62,f184,f3,f66"
+    )
+    try:
+        result = subprocess.run(
+            ["curl", "-s", "--noproxy", "*", url,
+             "-H", "User-Agent: Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36",
+             "-H", "Referer: https://quote.eastmoney.com/"],
+            capture_output=True, text=True, timeout=20
+        )
+        data = json.loads(result.stdout)
+        diff = data.get("data", {}).get("diff", [])
+        results = []
+        for item in diff:
+            name = item.get("f14", "")
+            if not name:
+                continue
+            main_net_inflow = item.get("f62", 0) or 0
+            # Only include sectors with negative net inflow (outflows)
+            if main_net_inflow < 0:
+                results.append({
+                    "code": item.get("f12", ""),
+                    "name": name,
+                    "mainNetInflow": main_net_inflow,
+                    "upCount": item.get("f184", 0) or 0,
+                    "downCount": item.get("f66", 0) or 0,
+                    "changePercent": item.get("f3", 0) or 0,
+                })
+        return results[:20]  # Return top 20 outflows
+    except Exception as exc:
+        common.log(f"fetch_concept_board_outflows failed: {exc}")
         return []
 
 
@@ -205,7 +252,7 @@ def calculate_fund_flow() -> tuple[list[dict], list[dict]]:
     return top_inflows, top_outflows
 
 
-def persist_fund_flow(top_inflows: list[dict], top_outflows: list[dict], concept_boards: list[dict]) -> dict:
+def persist_fund_flow(top_inflows: list[dict], top_outflows: list[dict], concept_boards: list[dict], sector_outflows: list[dict]) -> dict:
     """Store fund flow data in database."""
     today = datetime.utcnow().strftime("%Y-%m-%d")
     today_ts = int(datetime.strptime(today, "%Y-%m-%d").timestamp() * 1000)
@@ -247,7 +294,7 @@ def persist_fund_flow(top_inflows: list[dict], top_outflows: list[dict], concept
             ))
             summary["outflows"] += 1
 
-        # Insert concept board (theme sector) fund flow
+        # Insert concept board (theme sector) fund flow (inflows)
         for board in concept_boards:
             conn.execute("""
                 INSERT INTO FundFlow (level, code, name, flowDate, mainNetInflow, largeOrderNetInflow, changePercent)
@@ -259,6 +306,22 @@ def persist_fund_flow(top_inflows: list[dict], top_outflows: list[dict], concept
                 today_ts,
                 board.get("mainNetInflow", 0),
                 board.get("upCount", 0),
+                board.get("changePercent", 0)
+            ))
+            summary["sectors"] += 1
+
+        # Insert sector outflows
+        for board in sector_outflows:
+            conn.execute("""
+                INSERT INTO FundFlow (level, code, name, flowDate, mainNetInflow, largeOrderNetInflow, changePercent)
+                VALUES (?, ?, ?, ?, ?, ?, ?)
+            """, (
+                "sector_outflow",
+                board.get("code"),
+                board.get("name"),
+                today_ts,
+                board.get("mainNetInflow", 0),
+                board.get("downCount", 0),
                 board.get("changePercent", 0)
             ))
             summary["sectors"] += 1
@@ -280,11 +343,17 @@ def main() -> int:
 
     print("\nFetching concept board (theme sector) fund flow...")
     concept_boards = fetch_concept_board_flow()
-    print(f"Got {len(concept_boards)} concept boards")
+    print(f"Got {len(concept_boards)} concept boards (inflows)")
     for board in concept_boards[:5]:
         print(f"  {board['name']}: 净流入={board['mainNetInflow']}万 涨跌={board['changePercent']}%")
 
-    summary = persist_fund_flow(top_inflows, top_outflows, concept_boards)
+    print("\nFetching sector outflows...")
+    sector_outflows = fetch_concept_board_outflows()
+    print(f"Got {len(sector_outflows)} sector outflows")
+    for board in sector_outflows[:5]:
+        print(f"  {board['name']}: 净流出={board['mainNetInflow']}万 涨跌={board['changePercent']}%")
+
+    summary = persist_fund_flow(top_inflows, top_outflows, concept_boards, sector_outflows)
     print(f"\nPersisted {summary['inflows']} inflows, {summary['outflows']} outflows, {summary['sectors']} sectors")
     print(json.dumps({"ok": True, **summary}, ensure_ascii=False))
     return 0

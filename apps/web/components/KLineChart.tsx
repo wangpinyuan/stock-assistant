@@ -4,28 +4,17 @@ import { useEffect, useRef, useState } from 'react';
 import { Card, Empty, Radio, Space, Spin, Typography } from 'antd';
 import type { IChartApi, ISeriesApi, Time, UTCTimestamp } from 'lightweight-charts';
 import { fetchApi } from '../lib/api';
+import { toNumber } from '@stock-assistant/shared';
+import type { KlineRow } from '@stock-assistant/shared';
+import { useLocalStorageCache } from '../hooks/useLocalStorageCache';
 
 type Period = 'daily' | 'weekly' | 'monthly';
 
-interface KlineRow {
-  tradeDate?: string;
-  weekDate?: string;
-  monthDate?: string;
-  time?: string;
-  open: number | string;
-  high: number | string;
-  low: number | string;
-  close: number | string;
-  volume?: number | string | null;
-  ma5?: number | string | null;
-  ma10?: number | string | null;
-  ma20?: number | string | null;
-}
-
-function toNumber(value: number | string | null | undefined): number {
-  if (value == null) return 0;
-  return typeof value === 'number' ? value : Number(value);
-}
+const KLINE_TTL: Record<Period, number> = {
+  daily: 24 * 60 * 60 * 1000,
+  weekly: 7 * 24 * 60 * 60 * 1000,
+  monthly: 30 * 24 * 60 * 60 * 1000
+};
 
 function dateField(row: KlineRow, period: Period): string {
   if (period === 'weekly') return row.weekDate ?? '';
@@ -54,6 +43,8 @@ export function KLineChart({ code }: { code: string }) {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [hasData, setHasData] = useState(false);
+  const { getCached, setCached } = useLocalStorageCache();
+  const cacheKey = `cache_kline_${code}_${period}`;
 
   useEffect(() => {
     if (!containerRef.current) return;
@@ -130,6 +121,17 @@ export function KLineChart({ code }: { code: string }) {
     let cancelled = false;
     setLoading(true);
     setError(null);
+
+    const cached = getCached<{ items: KlineRow[] }>(cacheKey);
+    if (cached && Date.now() - cached.timestamp < KLINE_TTL[period]) {
+      if (cached.data.items.length) {
+        setHasData(true);
+        renderChart(cached.data.items);
+      }
+      setLoading(false);
+      return;
+    }
+
     fetchApi<{ items: KlineRow[] }>(`/stocks/${code}/kline?period=${period}`)
       .then((data) => {
         if (cancelled) return;
@@ -139,33 +141,8 @@ export function KLineChart({ code }: { code: string }) {
           return;
         }
         setHasData(true);
-
-        const bars: BarInput[] = items.map((row) => {
-          const dateStr = dateField(row, period);
-          const ts = Math.floor(new Date(dateStr).getTime() / 1000) as UTCTimestamp;
-          return {
-            time: ts as Time,
-            open: toNumber(row.open),
-            high: toNumber(row.high),
-            low: toNumber(row.low),
-            close: toNumber(row.close)
-          };
-        });
-        const volumeBars = items.map((row, idx) => ({
-          time: bars[idx].time,
-          value: toNumber(row.volume ?? 0),
-          color: toNumber(row.close) >= toNumber(row.open) ? '#cf1322' : '#389e0d'
-        }));
-        const ma5 = items.map((row, idx) => ({ time: bars[idx].time, value: toNumber(row.ma5 ?? 0) || NaN }));
-        const ma10 = items.map((row, idx) => ({ time: bars[idx].time, value: toNumber(row.ma10 ?? 0) || NaN }));
-        const ma20 = items.map((row, idx) => ({ time: bars[idx].time, value: toNumber(row.ma20 ?? 0) || NaN }));
-
-        seriesRef.current?.setData(bars);
-        volumeSeriesRef.current?.setData(volumeBars);
-        ma5Ref.current?.setData(ma5);
-        ma10Ref.current?.setData(ma10);
-        ma20Ref.current?.setData(ma20);
-        chartRef.current?.timeScale().fitContent();
+        setCached(cacheKey, data);
+        renderChart(items);
       })
       .catch((err) => {
         if (!cancelled) setError(err instanceof Error ? err.message : '加载K线失败');
@@ -176,7 +153,36 @@ export function KLineChart({ code }: { code: string }) {
     return () => {
       cancelled = true;
     };
-  }, [code, period]);
+  }, [code, period, cacheKey, getCached, setCached]);
+
+  function renderChart(items: KlineRow[]) {
+    const bars: BarInput[] = items.map((row) => {
+      const dateStr = dateField(row, period);
+      const ts = Math.floor(new Date(dateStr).getTime() / 1000) as UTCTimestamp;
+      return {
+        time: ts as Time,
+        open: toNumber(row.open),
+        high: toNumber(row.high),
+        low: toNumber(row.low),
+        close: toNumber(row.close)
+      };
+    });
+    const volumeBars = items.map((row, idx) => ({
+      time: bars[idx].time,
+      value: toNumber(row.volume ?? 0),
+      color: toNumber(row.close) >= toNumber(row.open) ? '#cf1322' : '#389e0d'
+    }));
+    const ma5 = items.map((row, idx) => ({ time: bars[idx].time, value: toNumber(row.ma5 ?? 0) || NaN }));
+    const ma10 = items.map((row, idx) => ({ time: bars[idx].time, value: toNumber(row.ma10 ?? 0) || NaN }));
+    const ma20 = items.map((row, idx) => ({ time: bars[idx].time, value: toNumber(row.ma20 ?? 0) || NaN }));
+
+    seriesRef.current?.setData(bars);
+    volumeSeriesRef.current?.setData(volumeBars);
+    ma5Ref.current?.setData(ma5);
+    ma10Ref.current?.setData(ma10);
+    ma20Ref.current?.setData(ma20);
+    chartRef.current?.timeScale().fitContent();
+  }
 
   return (
     <Card

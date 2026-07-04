@@ -1,12 +1,13 @@
 import { prisma } from '../plugins/prisma';
-import { execSync } from 'child_process';
-import { resolve, dirname } from 'path';
-import { fileURLToPath } from 'url';
 import { toNumberOrNull } from '@stock-assistant/shared';
+import { lookupStockNames, lookupStockPrices } from '../utils/stockLookup';
 
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = dirname(__filename);
+// ==================== Magic numbers ====================
+const LIMIT_UP_THRESHOLD = 9.9;
+const STRONG_THRESHOLD = 3;
+const WEAK_THRESHOLD = -3;
 
+// ==================== Market Breadth ====================
 export interface MarketBreadth {
   tradeDate: string | null;
   upCount: number;
@@ -15,47 +16,46 @@ export interface MarketBreadth {
   limitUpCount: number;
   limitDownCount: number;
   totalCount: number;
-  strongCount: number;    // 强势股（涨幅 > 3%）
-  weakCount: number;      // 弱势股（跌幅 > 3%）
-  avgUpCount: number;     // 均价上涨（现价 > 开盘价）
-  avgDownCount: number;   // 均价下跌（现价 < 开盘价）
+  strongCount: number;
+  weakCount: number;
+  avgUpCount: number;
+  avgDownCount: number;
 }
 
 export async function getMarketBreadth(): Promise<MarketBreadth> {
-  const latest = await prisma.quote.findFirst({ orderBy: { tradeDate: 'desc' } });
-  if (!latest) {
+  // Find the most recent trading date with a meaningful number of quotes (avoid Sunday/holiday sparse data)
+  const dateCounts = await prisma.quote.groupBy({
+    by: ['tradeDate'],
+    _count: { id: true },
+    orderBy: { tradeDate: 'desc' },
+    take: 5
+  });
+
+  const validDate = dateCounts.find((d) => d._count.id >= 100)?.tradeDate ?? dateCounts[0]?.tradeDate;
+  if (!validDate) {
     return { tradeDate: null, upCount: 0, downCount: 0, flatCount: 0, limitUpCount: 0, limitDownCount: 0, totalCount: 0, strongCount: 0, weakCount: 0, avgUpCount: 0, avgDownCount: 0 };
   }
 
-  const quotes = await prisma.quote.findMany({ where: { tradeDate: latest.tradeDate } });
-  let up = 0;
-  let down = 0;
-  let flat = 0;
-  let limitUp = 0;
-  let limitDown = 0;
-  let strong = 0;
-  let weak = 0;
-  let avgUp = 0;
-  let avgDown = 0;
+  const quotes = await prisma.quote.findMany({
+    where: { tradeDate: validDate },
+    include: { stock: true }
+  }).then((qs) => qs.filter((q) => q.stock?.assetType === 'stock'));
+
+  let up = 0, down = 0, flat = 0, limitUp = 0, limitDown = 0, strong = 0, weak = 0, avgUp = 0, avgDown = 0;
 
   for (const quote of quotes) {
     const pct = toNumberOrNull(quote.changePercent);
-    if (pct == null) {
-      flat += 1;
-      continue;
-    }
+    if (pct == null) { flat += 1; continue; }
     if (pct > 0) up += 1;
     else if (pct < 0) down += 1;
     else flat += 1;
 
-    if (pct >= 9.9) limitUp += 1;
-    else if (pct <= -9.9) limitDown += 1;
+    if (pct >= LIMIT_UP_THRESHOLD) limitUp += 1;
+    else if (pct <= -LIMIT_UP_THRESHOLD) limitDown += 1;
 
-    // 强势股（涨幅 > 3%）和弱势股（跌幅 > 3%）
-    if (pct > 3) strong += 1;
-    else if (pct < -3) weak += 1;
+    if (pct > STRONG_THRESHOLD) strong += 1;
+    else if (pct < WEAK_THRESHOLD) weak += 1;
 
-    // 均价涨跌（现价 > 开盘价）
     const open = toNumberOrNull(quote.open);
     const current = toNumberOrNull(quote.currentPrice);
     if (open != null && current != null) {
@@ -65,20 +65,14 @@ export async function getMarketBreadth(): Promise<MarketBreadth> {
   }
 
   return {
-    tradeDate: latest.tradeDate.toISOString().slice(0, 10),
-    upCount: up,
-    downCount: down,
-    flatCount: flat,
-    limitUpCount: limitUp,
-    limitDownCount: limitDown,
-    totalCount: quotes.length,
-    strongCount: strong,
-    weakCount: weak,
-    avgUpCount: avgUp,
-    avgDownCount: avgDown
+    tradeDate: validDate.toISOString().slice(0, 10),
+    upCount: up, downCount: down, flatCount: flat,
+    limitUpCount: limitUp, limitDownCount: limitDown, totalCount: quotes.length,
+    strongCount: strong, weakCount: weak, avgUpCount: avgUp, avgDownCount: avgDown
   };
 }
 
+// ==================== Index Quotes ====================
 export interface IndexQuote {
   code: string;
   name: string;
@@ -96,33 +90,17 @@ const MAJOR_INDEX_CODES = [
   { code: 'usspx', name: '标普500', prefix: 'us' }
 ];
 
-function fetchFromSina(codes: string[]): Map<string, { price: number; change: number; pct: number }> {
-  const result = new Map<string, { price: number; change: number; pct: number }>();
-  try {
-    const scriptsDir = resolve(__dirname, '..', '..', '..', 'worker', 'scripts');
-    const joined = codes.join(',');
-    const output = execSync(`python3 "${scriptsDir}/lookup_stock.py" "${joined}" --batch`, {
-      timeout: 30000,
-      encoding: 'utf-8'
-    });
-    const data = JSON.parse(output) as { ok: boolean; items?: Array<{ code: string; price: number; change: number; pct: number }> };
-    if (data.ok && data.items) {
-      for (const item of data.items) {
-        result.set(item.code, { price: item.price, change: item.change, pct: item.pct });
-      }
-    }
-  } catch (err) {
-    console.error('[ERROR] fetchFromSina failed:', err);
-  }
-  return result;
+function getLookupCode(entry: typeof MAJOR_INDEX_CODES[number]): string {
+  // US/HK indices already include market prefix in code, use directly
+  if (entry.prefix === 'us' || entry.prefix === 'hk') return entry.code;
+  return `${entry.prefix}${entry.code}`;
 }
 
 export async function getMarketIndexes(): Promise<{ items: IndexQuote[] }> {
-  // Try to get from Sina API first for real-time data
-  const indexCodes = MAJOR_INDEX_CODES.map((entry) => entry.code);
-  const sinaData = fetchFromSina(indexCodes);
+  const indexCodes = MAJOR_INDEX_CODES.map((e) => e.code);
+  const sinaCodes = MAJOR_INDEX_CODES.map((e) => getLookupCode(e));
+  const sinaPrices = lookupStockPrices(sinaCodes);
 
-  // Merge with database data
   const latest = await prisma.quote.findFirst({ orderBy: { tradeDate: 'desc' } });
   const records = latest
     ? await prisma.quote.findMany({ where: { code: { in: indexCodes }, tradeDate: latest.tradeDate } })
@@ -131,29 +109,22 @@ export async function getMarketIndexes(): Promise<{ items: IndexQuote[] }> {
 
   return {
     items: MAJOR_INDEX_CODES.map((entry) => {
-      const sina = sinaData.get(entry.code);
       const db = dbByCode.get(entry.code);
-      // Prefer Sina data if available, otherwise use database
-      if (sina) {
-        return {
-          code: entry.code,
-          name: entry.name,
-          currentPrice: sina.price,
-          changeAmount: sina.change,
-          changePercent: sina.pct
-        };
-      }
+      const sinaKey = getLookupCode(entry);
+      const sinaData = sinaPrices.get(sinaKey);
+      // Use Sina data if available, otherwise fall back to database
       return {
         code: entry.code,
         name: entry.name,
-        currentPrice: toNumberOrNull(db?.currentPrice),
-        changeAmount: toNumberOrNull(db?.changeAmount),
-        changePercent: toNumberOrNull(db?.changePercent)
+        currentPrice: sinaData ? sinaData.price : toNumberOrNull(db?.currentPrice),
+        changeAmount: sinaData ? sinaData.change : toNumberOrNull(db?.changeAmount),
+        changePercent: sinaData ? sinaData.pct : toNumberOrNull(db?.changePercent)
       };
     })
   };
 }
 
+// ==================== Sectors ====================
 export interface SectorFlow {
   name: string;
   changePercent: number | null;
@@ -172,41 +143,74 @@ export async function getMarketSectors(): Promise<{ items: SectorFlow[] }> {
   }
 
   const latest = await prisma.quote.findFirst({ orderBy: { tradeDate: 'desc' } });
-  const codes = stocks.map((stock) => stock.code);
+  const codes = stocks.map((s) => s.code);
   const quotes = latest
     ? await prisma.quote.findMany({ where: { code: { in: codes }, tradeDate: latest.tradeDate } })
     : [];
-  const quoteByCode = new Map(quotes.map((quote) => [quote.code, quote]));
+  const quoteByCode = new Map(quotes.map((q) => [q.code, q]));
 
   const items: SectorFlow[] = [];
   for (const [sector, members] of groups) {
-    let sumPercent = 0;
-    let count = 0;
+    let sumPercent = 0, count = 0;
     for (const stock of members) {
       const quote = quoteByCode.get(stock.code);
       const pct = toNumberOrNull(quote?.changePercent);
-      if (pct != null) {
-        sumPercent += pct;
-        count += 1;
-      }
+      if (pct != null) { sumPercent += pct; count += 1; }
     }
-    items.push({
-      name: sector,
-      changePercent: count > 0 ? sumPercent / count : null,
-      mainNetInflow: null,
-      stockCount: members.length
-    });
+    items.push({ name: sector, changePercent: count > 0 ? sumPercent / count : null, mainNetInflow: null, stockCount: members.length });
   }
 
   items.sort((a, b) => (b.changePercent ?? 0) - (a.changePercent ?? 0));
   return { items };
 }
 
+// ==================== Breadth Stock List ====================
+export interface BreadthStockItem {
+  code: string;
+  name: string;
+  changePercent: number | null;
+  currentPrice: number | null;
+}
+
+type BreadthType = 'limitUp' | 'limitDown' | 'strong' | 'weak';
+
+export async function getBreadthStocks(type: BreadthType, limit = 50): Promise<{ items: BreadthStockItem[] }> {
+  const latest = await prisma.quote.findFirst({ orderBy: { tradeDate: 'desc' } });
+  if (!latest) return { items: [] };
+
+  const where: Record<string, unknown> = { tradeDate: latest.tradeDate };
+  const orderBy: Record<string, string> = type === 'limitDown' || type === 'weak' ? { changePercent: 'asc' } : { changePercent: 'desc' };
+
+  switch (type) {
+    case 'limitUp': where.changePercent = { gte: LIMIT_UP_THRESHOLD }; break;
+    case 'limitDown': where.changePercent = { lte: -LIMIT_UP_THRESHOLD }; break;
+    case 'strong': where.changePercent = { gt: STRONG_THRESHOLD }; break;
+    case 'weak': where.changePercent = { lt: WEAK_THRESHOLD }; break;
+  }
+
+  const quotes = await prisma.quote.findMany({
+    where,
+    include: { stock: true },
+    orderBy,
+    take: limit
+  });
+
+  const codes = quotes.map((q) => q.code);
+  const namesFromSina = lookupStockNames(codes);
+
+  return {
+    items: quotes.map((q) => ({
+      code: q.code,
+      name: namesFromSina.get(q.code) ?? q.stock?.name ?? q.code,
+      changePercent: toNumberOrNull(q.changePercent),
+      currentPrice: toNumberOrNull(q.currentPrice)
+    }))
+  };
+}
+
+// ==================== Overview ====================
 export async function getMarketOverview() {
-  const [breadth, indexes, sectors] = await Promise.all([
-    getMarketBreadth(),
-    getMarketIndexes(),
-    getMarketSectors()
-  ]);
-  return { sentiment: breadth.upCount > breadth.downCount ? 'bull' : breadth.upCount < breadth.downCount ? 'bear' : 'neutral', indexes: indexes.items, sectors: sectors.items, breadth };
+  const [breadth, indexes] = await Promise.all([getMarketBreadth(), getMarketIndexes()]);
+  const sentiment = breadth.upCount > breadth.downCount ? 'bull' : breadth.upCount < breadth.downCount ? 'bear' : 'neutral';
+  return { sentiment, indexes: indexes.items, breadth };
 }

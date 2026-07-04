@@ -35,12 +35,11 @@ def get_market_prefix(code: str) -> str:
         return "us"  # US indices handled separately
     # Pad numeric codes to 6 digits
     normalized = normalized.zfill(6)
-    # Shanghai indices (000xxx, 001xxx) -> sh
-    # Shenzhen indices (399xxx) -> sz
-    # Stocks: 6xxxx -> sh, 0xxxx -> sz
+    # Shanghai: 6xxxx, 5xxxx, 9xxxx (stocks) OR 000xxx (indices like 000300, 000905)
+    # Shenzhen: 001xxx, 002xxx, 300xxx (stocks) OR 399xxx (indices like 399006)
     if normalized.startswith(("6", "5", "9")):
         return "sh"
-    if normalized.startswith(("000", "001", "002")):
+    if normalized.startswith("000") or normalized.startswith("399"):
         return "sh"
     return "sz"
 
@@ -116,13 +115,13 @@ def lookup_batch(codes: list[str]) -> dict:
     try:
         items = []
         for code in codes:
-            normalized = code.strip()
-            if not normalized:
+            original_code = code.strip()
+            if not original_code:
                 continue
 
             # Handle US indices via Yahoo Finance (no zfill needed)
-            if normalized.startswith("us"):
-                yahoo_sym = YAHOO_SYMBOLS.get(normalized)
+            if original_code.startswith("us"):
+                yahoo_sym = YAHOO_SYMBOLS.get(original_code)
                 if not yahoo_sym:
                     continue
                 time.sleep(0.5)  # Rate limit delay before Yahoo request
@@ -131,20 +130,31 @@ def lookup_batch(codes: list[str]) -> dict:
                     # Get display name from mapping
                     name_map = {"usixic": "纳斯达克", "usspx": "标普500", "usndx": "纳斯达克100", "usdji": "道琼斯"}
                     items.append({
-                        "code": normalized,
-                        "name": name_map.get(normalized, yahoo_sym),
+                        "code": original_code,
+                        "name": name_map.get(original_code, yahoo_sym),
                         "price": data["price"],
                         "change": data["change"],
                         "pct": data["pct"],
                     })
                 continue
 
+            # Detect market prefix before stripping
+            market_prefix = ""
+            normalized = original_code
+            if normalized.startswith(("sh", "sz", "hk")):
+                market_prefix = normalized[:2]
+                normalized = normalized[2:]
+
             # Pad to 6 digits for A-shares (numeric codes only)
             if normalized.isdigit():
                 normalized = normalized.zfill(6)
 
-            market = get_market_prefix(normalized)
-            # For HK indices, the prefix is already in the code, don't add it again
+            # Use detected prefix if available, otherwise determine from code
+            if not market_prefix:
+                market = get_market_prefix(normalized)
+            else:
+                market = market_prefix
+
             if market == "hk":
                 url = f"https://hq.sinajs.cn/list={normalized}"
             else:
@@ -165,7 +175,7 @@ def lookup_batch(codes: list[str]) -> dict:
             if len(fields) < 10:
                 continue
             name = fields[0]
-            is_hk_index = normalized.startswith("hk")
+            is_hk_index = market_prefix == "hk"
             is_a_index = normalized.startswith(("000", "399"))
             if is_hk_index:
                 # HK index format: fields[0]=symbol, fields[1]=name, fields[2]=current, fields[3]=prev_close
@@ -186,7 +196,7 @@ def lookup_batch(codes: list[str]) -> dict:
                 change = current_price - prev_close
                 change_pct = round(change / prev_close * 100, 2)
             items.append({
-                "code": normalized,
+                "code": original_code,
                 "name": name,
                 "price": current_price,
                 "change": round(change, 2) if change is not None else None,

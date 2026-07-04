@@ -1,5 +1,6 @@
 import { prisma } from '../plugins/prisma';
 import { toNumber, toNumberOrNull } from '@stock-assistant/shared';
+import type { KlineRow } from '@stock-assistant/shared';
 
 export async function getStockDetail(code: string) {
   return prisma.stock.findUnique({ where: { code } });
@@ -28,24 +29,6 @@ export async function getStockKline(code: string, period: string) {
   return { items: await prisma.klineDaily.findMany({ where: { code }, orderBy: { tradeDate: 'asc' } }) };
 }
 
-export async function getStockNews(code: string) {
-  return {
-    items: await prisma.newsItem.findMany({
-      where: { code },
-      orderBy: { publishDate: 'desc' }
-    })
-  };
-}
-
-interface KlineRow {
-  tradeDate: Date;
-  close: unknown;
-  high: unknown;
-  low: unknown;
-  open: unknown;
-  volume: unknown;
-}
-
 function movingAverage(rows: KlineRow[], window: number): (number | null)[] {
   const result: (number | null)[] = [];
   for (let i = 0; i < rows.length; i += 1) {
@@ -55,7 +38,7 @@ function movingAverage(rows: KlineRow[], window: number): (number | null)[] {
     }
     let sum = 0;
     for (let j = i - window + 1; j <= i; j += 1) {
-      sum += toNumber(rows[j].close);
+      sum += toNumber(rows[j].close as number | string);
     }
     result.push(sum / window);
   }
@@ -77,7 +60,7 @@ export async function getStockAnalysisSignals(code: string) {
   const ma20 = movingAverage(daily, 20);
 
   const last = daily.length - 1;
-  const close = toNumber(daily[last].close);
+  const close = toNumber(daily[last].close as number | string);
   const lastMa5 = ma5[last];
   const lastMa10 = ma10[last];
   const lastMa20 = ma20[last];
@@ -101,12 +84,11 @@ export async function getStockAnalysisSignals(code: string) {
     }
   }
 
-  // 连续涨跌天数
   let streak = 0;
   let direction: 'up' | 'down' | null = null;
   for (let i = daily.length - 1; i > 0; i -= 1) {
-    const today = toNumber(daily[i].close);
-    const yesterday = toNumber(daily[i - 1].close);
+    const today = toNumber(daily[i].close as number | string);
+    const yesterday = toNumber(daily[i - 1].close as number | string);
     if (today > yesterday) {
       if (direction === 'down') break;
       direction = 'up';
@@ -128,10 +110,9 @@ export async function getStockAnalysisSignals(code: string) {
     });
   }
 
-  // 量能：最近 5 日均量 vs 前 20 日均量
   if (daily.length >= 25) {
-    const recent5 = daily.slice(-5).reduce((sum, row) => sum + toNumber(row.volume), 0) / 5;
-    const prior20 = daily.slice(-25, -5).reduce((sum, row) => sum + toNumber(row.volume), 0) / 20;
+    const recent5 = daily.slice(-5).reduce((sum, row) => sum + toNumber(row.volume as number | string), 0) / 5;
+    const prior20 = daily.slice(-25, -5).reduce((sum, row) => sum + toNumber(row.volume as number | string), 0) / 20;
     if (prior20 > 0) {
       const ratio = recent5 / prior20;
       if (ratio >= 1.5) {
@@ -150,15 +131,5 @@ export async function getStockAnalysisSignals(code: string) {
       ma20: toNumberOrNull(lastMa20),
       lastClose: close
     }
-  };
-}
-
-export async function getStockFundFlow(code: string) {
-  return {
-    items: await prisma.fundFlow.findMany({
-      where: { code, level: 'stock' },
-      orderBy: { flowDate: 'desc' },
-      take: 30
-    })
   };
 }

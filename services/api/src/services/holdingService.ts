@@ -1,26 +1,6 @@
 import { prisma } from '../plugins/prisma';
-import { execSync } from 'child_process';
-import { resolve } from 'path';
-import { toNumber, toNumberOrNull, isValidStockCode } from '@stock-assistant/shared';
-
-function lookupStockFromAkShare(code: string): { name: string | null; assetType: 'stock' | 'etf' } {
-  // Validate stock code format to prevent command injection
-  if (!isValidStockCode(code)) {
-    return { name: null, assetType: 'stock' };
-  }
-  try {
-    const scriptsDir = resolve(__dirname, '..', '..', '..', 'worker', 'scripts');
-    const result = execSync(`python3 "${scriptsDir}/lookup_stock.py" "${code}"`, {
-      timeout: 15000,
-      encoding: 'utf-8'
-    });
-    const data = JSON.parse(result) as { ok: boolean; name?: string; error?: string };
-    if (!data.ok) return { name: null, assetType: 'stock' };
-    return { name: data.name ?? null, assetType: 'stock' };
-  } catch {
-    return { name: null, assetType: 'stock' };
-  }
-}
+import { toNumber, toNumberOrNull } from '@stock-assistant/shared';
+import { lookupStock, ensureStockExists } from '../utils/stockLookup';
 
 export async function getHoldings() {
   const holdings = await prisma.holding.findMany({
@@ -91,27 +71,19 @@ export interface HoldingInput {
   note?: string | null;
 }
 
-async function ensureStock(code: string, name: string, assetType: 'stock' | 'etf') {
-  return prisma.stock.upsert({
-    where: { code },
-    create: { code, name, assetType, market: 'A股' },
-    update: {}
-  });
-}
-
 export async function createHolding(input: HoldingInput) {
   const stock = await prisma.stock.findUnique({ where: { code: input.code } });
   let name: string | null | undefined = stock?.name;
   let assetType = (stock?.assetType as 'stock' | 'etf') ?? input.assetType;
 
   if (!name) {
-    const looked = lookupStockFromAkShare(input.code);
+    const looked = lookupStock(input.code);
     name = looked.name;
     assetType = looked.assetType;
   }
   name = name || input.code;
 
-  await ensureStock(input.code, name, assetType);
+  await ensureStockExists(prisma, input.code, name, assetType);
 
   const holding = await prisma.holding.create({
     data: {
