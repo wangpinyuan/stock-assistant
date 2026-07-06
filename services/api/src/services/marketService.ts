@@ -82,6 +82,7 @@ export interface IndexQuote {
 }
 
 const MAJOR_INDEX_CODES = [
+  { code: '000001', name: '上证指数', prefix: 'sh' },
   { code: '000300', name: '沪深300', prefix: 'sh' },
   { code: '000905', name: '中证500', prefix: 'sh' },
   { code: '399006', name: '创业板指', prefix: 'sz' },
