@@ -1,8 +1,30 @@
 import { spawn } from 'node:child_process';
-import { resolve } from 'node:path';
+import { resolve, dirname } from 'node:path';
+import { fileURLToPath } from 'node:url';
+import { existsSync } from 'node:fs';
 
-const projectRoot = process.cwd();
-const workerDir = resolve(projectRoot, 'services', 'worker');
+// Find project root by looking for prisma/schema.prisma
+function findProjectRoot(startDir: string): string {
+  let dir = startDir;
+  for (let i = 0; i < 10; i++) {
+    if (existsSync(resolve(dir, 'prisma', 'schema.prisma'))) {
+      return dir;
+    }
+    const parent = resolve(dir, '..');
+    if (parent === dir) break;
+    dir = parent;
+  }
+  // Fallback to cwd
+  return startDir;
+}
+
+// Get the directory of the current module (services/api/src/services/)
+const currentDir = dirname(fileURLToPath(import.meta.url));
+// Go up: services -> project root
+const projectRoot = resolve(currentDir, '..', '..', '..', '..');
+const resolvedProjectRoot = findProjectRoot(projectRoot);
+
+const workerDir = resolve(resolvedProjectRoot, 'services', 'worker');
 const scriptsDir = resolve(workerDir, 'scripts');
 
 export interface WorkerOptions {
