@@ -19,7 +19,7 @@ export function StockKLineModal({ open, code, name, onClose, width = 900 }: Stoc
       onCancel={onClose}
       footer={null}
       width={width}
-      destroyOnClose
+      destroyOnHidden
     >
       {open && code && <KLineChart code={code} />}
     </Modal>

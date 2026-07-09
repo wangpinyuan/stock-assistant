@@ -13,30 +13,86 @@ export async function getStockQuote(code: string) {
   });
 }
 
-export async function getStockKline(code: string, period: string, before?: string) {
-  if (period === 'weekly') {
-    if (before) {
-      return { items: await prisma.$queryRaw`SELECT * FROM KlineWeekly WHERE code = ${code} AND weekDate < ${before} ORDER BY weekDate ASC` };
-    }
-    return { items: await prisma.klineWeekly.findMany({ where: { code }, orderBy: { weekDate: 'asc' } }) };
-  }
+type SinaBar = {
+  day: string;
+  open: string | number;
+  high: string | number;
+  low: string | number;
+  close: string | number;
+  volume: string | number;
+};
 
-  if (period === 'monthly') {
-    if (before) {
-      return { items: await prisma.$queryRaw`SELECT * FROM KlineMonthly WHERE code = ${code} AND monthDate < ${before} ORDER BY monthDate ASC` };
-    }
-    return { items: await prisma.klineMonthly.findMany({ where: { code }, orderBy: { monthDate: 'asc' } }) };
-  }
-
-  if (period === 'intraday') {
-    return { items: await prisma.intradayQuote.findMany({ where: { code }, orderBy: [{ tradeDate: 'asc' }, { time: 'asc' }] }) };
-  }
-
-  if (before) {
-    return { items: await prisma.$queryRaw`SELECT * FROM KlineDaily WHERE code = ${code} AND tradeDate < ${before} ORDER BY tradeDate ASC` };
-  }
-  return { items: await prisma.klineDaily.findMany({ where: { code }, orderBy: { tradeDate: 'asc' } }) };
+async function fetchDailyFromSina(code: string): Promise<SinaBar[]> {
+  const market = code.startsWith('5') || code.startsWith('6') || code.startsWith('9') ? 'sh' : 'sz';
+  const url = `http://money.finance.sina.com.cn/quotes_service/api/json_v2.php/CN_MarketData.getKLineData?symbol=${market}${code}&scale=240&ma=no&datalen=2500`;
+  const resp = await fetch(url, { signal: AbortSignal.timeout(8000) });
+  if (!resp.ok) throw new Error(`sina returned ${resp.status}`);
+  const raw = await resp.text();
+  const data = JSON.parse(raw) as SinaBar[] | null;
+  return Array.isArray(data) ? data : [];
 }
+
+
+
+function barsToKlineRows(period: string, bars: SinaBar[]): KlineRow[] {
+  const closes = bars.map((b) => Number(b.close));
+  const ma5 = movingAverageFromCloses(closes, 5);
+  const ma10 = movingAverageFromCloses(closes, 10);
+  const ma20 = movingAverageFromCloses(closes, 20);
+  return bars.map((b, i) => {
+    const date = String(b.day).slice(0, 10);
+    const row: KlineRow = {
+      open: Number(b.open),
+      high: Number(b.high),
+      low: Number(b.low),
+      close: Number(b.close),
+      volume: Number(b.volume),
+      ma5: ma5[i] ?? null,
+      ma10: ma10[i] ?? null,
+      ma20: ma20[i] ?? null
+    };
+    if (period === 'weekly') row.weekDate = date;
+    else if (period === 'monthly') row.monthDate = date;
+    else row.tradeDate = date;
+    return row;
+  });
+}
+
+function movingAverageFromCloses(closes: number[], window: number): (number | null)[] {
+  const result: (number | null)[] = [];
+  for (let i = 0; i < closes.length; i++) {
+    if (i < window - 1) {
+      result.push(null);
+      continue;
+    }
+    let sum = 0;
+    for (let j = i - window + 1; j <= i; j++) sum += closes[j];
+    result.push(sum / window);
+  }
+  return result;
+}
+
+export async function getStockKline(code: string, period: string, before?: string) {
+  // Realtime: always hit Sina on every request. Only daily is supported;
+  // weekly/monthly return empty so the chart shows no data for those tabs.
+  if (period !== 'daily') {
+    return { items: [] };
+  }
+
+  try {
+    let bars = await fetchDailyFromSina(code);
+    if (before) {
+      bars = bars.filter((b) => String(b.day).slice(0, 10) < before);
+    }
+    const items = barsToKlineRows(period, bars);
+    return { items };
+  } catch (err) {
+    console.warn('[kline] realtime fetch failed', code, err instanceof Error ? err.message : err);
+    return { items: [] };
+  }
+}
+
+
 
 function movingAverage(rows: KlineRow[], window: number): (number | null)[] {
   const result: (number | null)[] = [];

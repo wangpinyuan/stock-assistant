@@ -59,7 +59,13 @@ export function FundFlowCard({ tab, tabs, data, loading, error, lastUpdateTime, 
       ) : data.length === 0 ? (
         <Empty description="暂无资金流数据" />
       ) : (
-        <Table rowKey="id" dataSource={data} pagination={{ pageSize: 10 }} size="small" columns={columns(onNameClick)} />
+        <Table
+          rowKey="id"
+          dataSource={data}
+          pagination={tab === 'sectors' || tab === 'sector-outflows' ? false : { pageSize: 10 }}
+          size="small"
+          columns={columns(onNameClick)}
+        />
       )}
     </Card>
   );

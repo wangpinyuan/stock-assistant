@@ -13,10 +13,30 @@ export async function getMarketFundFlow(limit = 20) {
 }
 
 export async function getSectorFundFlow(limit = 20) {
-  // Get concept board (theme sector) fund flow directly from FundFlow table
+  // Get concept board (theme sector) fund flow directly from FundFlow table.
+  // `order` controls sort by mainNetInflow: 'desc' for inflow ranking,
+  // 'asc' for outflow ranking.
+  return getSectorFundFlowImpl({ level: 'sector', order: 'desc', limit });
+}
+
+export async function getSectorOutflowFundFlow(limit = 20) {
+  // Sector outflows share the same source data as sector inflows; sort ascending
+  // by mainNetInflow so the most negative (i.e. largest outflow) rows come first.
+  return getSectorFundFlowImpl({ level: 'sector_outflow', order: 'asc', limit });
+}
+
+async function getSectorFundFlowImpl({
+  level,
+  order,
+  limit
+}: {
+  level: 'sector' | 'sector_outflow';
+  order: 'asc' | 'desc';
+  limit: number;
+}) {
   const items = await prisma.fundFlow.findMany({
-    where: { level: 'sector' },
-    orderBy: { mainNetInflow: 'desc' },
+    where: { level },
+    orderBy: { mainNetInflow: order },
     take: limit
   });
   return { items: items.map(toFundFlowRow) };

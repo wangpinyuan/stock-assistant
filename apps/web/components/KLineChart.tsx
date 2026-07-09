@@ -8,17 +8,11 @@ import { toNumber } from '@stock-assistant/shared';
 import type { KlineRow } from '@stock-assistant/shared';
 import { useLocalStorageCache } from '../hooks/useLocalStorageCache';
 
-type Period = 'daily' | 'weekly' | 'monthly';
+type Period = 'daily';
 
-const KLINE_TTL: Record<Period, number> = {
-  daily: 24 * 60 * 60 * 1000,
-  weekly: 7 * 24 * 60 * 60 * 1000,
-  monthly: 30 * 24 * 60 * 60 * 1000
-};
+const KLINE_TTL_MS = 24 * 60 * 60 * 1000;
 
-function dateField(row: KlineRow, period: Period): string {
-  if (period === 'weekly') return row.weekDate ?? '';
-  if (period === 'monthly') return row.monthDate ?? '';
+function dateField(row: KlineRow): string {
   return row.tradeDate ?? '';
 }
 
@@ -36,8 +30,12 @@ export function KLineChart({ code }: { code: string }) {
   const allDataRef = useRef<KlineRow[]>([]);
   // True when currently fetching more old data
   const isLoadingMoreRef = useRef(false);
+  // Set to true after we've confirmed there are no older bars to load. Prevents
+  // the scroll handler from re-triggering loadMore on every tick when the
+  // user is already at the start of the dataset.
+  const hasReachedStartRef = useRef(false);
 
-  const [period, setPeriod] = useState<Period>('daily');
+  const period: Period = 'daily';
   const [loading, setLoading] = useState(true);
   const [loadingMore, setLoadingMore] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -47,7 +45,7 @@ export function KLineChart({ code }: { code: string }) {
 
   const buildChartData = useCallback((items: KlineRow[]) => {
     const bars = items.map((row) => {
-      const dateStr = dateField(row, period);
+      const dateStr = dateField(row);
       const ts = Math.floor(new Date(dateStr).getTime() / 1000) as UTCTimestamp;
       return { time: ts as Time, open: toNumber(row.open), high: toNumber(row.high), low: toNumber(row.low), close: toNumber(row.close) };
     });
@@ -75,22 +73,30 @@ export function KLineChart({ code }: { code: string }) {
 
   // Load more older data
   const loadMore = useCallback((currentData: KlineRow[], currentPeriod: Period, currentCode: string) => {
-    if (isLoadingMoreRef.current) return;
+    if (isLoadingMoreRef.current || hasReachedStartRef.current) return;
     const existing = currentData;
-    const oldestDate = dateField(existing[0], currentPeriod);
+    if (existing.length === 0) return;
+    const oldestDate = dateField(existing[0]);
     isLoadingMoreRef.current = true;
     setLoadingMore(true);
     fetchApi<{ items: KlineRow[] }>(`/stocks/${currentCode}/kline?period=${currentPeriod}&before=${oldestDate}`)
       .then((res) => {
-        if (!res.items.length) return;
-        const existingFirstDate = dateField(existing[0], currentPeriod);
-        const newItems = res.items.filter((item) => dateField(item, currentPeriod) < existingFirstDate);
-        if (!newItems.length) return;
+        if (!res.items.length) {
+          // Backend confirmed there is no older data for this stock+period.
+          hasReachedStartRef.current = true;
+          return;
+        }
+        const existingFirstDate = dateField(existing[0]);
+        const newItems = res.items.filter((item) => dateField(item) < existingFirstDate);
+        if (!newItems.length) {
+          hasReachedStartRef.current = true;
+          return;
+        }
         const merged = [...newItems, ...existing];
         allDataRef.current = merged;
         applyDataToChart(merged);
       })
-      .catch(() => {})
+      .catch(() => { hasReachedStartRef.current = true; })
       .finally(() => { isLoadingMoreRef.current = false; setLoadingMore(false); });
   }, [applyDataToChart]);
 
@@ -101,16 +107,41 @@ export function KLineChart({ code }: { code: string }) {
     let ro: ResizeObserver | null = null;
     let scrollHandler: ((range: LogicalRange | null) => void) | null = null;
 
-    import('lightweight-charts').then((lib) => {
+    // Wait for the modal open animation to finish so clientWidth is non-zero.
+    const raf = requestAnimationFrame(() => {
+      if (!containerRef.current) return;
+      import('lightweight-charts').then((lib) => {
       if (!containerRef.current) return;
 
+      const containerWidth = containerRef.current.clientWidth || 800;
       const cv = lib.createChart(containerRef.current, {
         layout: { background: { color: '#ffffff' }, textColor: '#333' },
-        width: containerRef.current.clientWidth || 800,
+        width: containerWidth,
         height: 360,
         grid: { vertLines: { color: '#f0f0f0' }, horzLines: { color: '#f0f0f0' } },
-        timeScale: { borderColor: '#d9d9d9' },
-        rightPriceScale: { borderColor: '#d9d9d9' }
+        timeScale: {
+          borderColor: '#d9d9d9',
+          tickMarkFormatter: (time: number) => {
+            const d = new Date(time * 1000);
+            const y = d.getUTCFullYear();
+            const m = String(d.getUTCMonth() + 1).padStart(2, '0');
+            const day = String(d.getUTCDate()).padStart(2, '0');
+            return `${y}-${m}-${day}`;
+          }
+        },
+        rightPriceScale: { borderColor: '#d9d9d9' },
+        localization: {
+          locale: 'zh-CN',
+          // Override crosshair/tooltip date label to YYYY-MM-DD.
+          timeFormatter: (time: number) => {
+            const d = new Date(time * 1000);
+            const y = d.getUTCFullYear();
+            const m = String(d.getUTCMonth() + 1).padStart(2, '0');
+            const day = String(d.getUTCDate()).padStart(2, '0');
+            return `${y}-${m}-${day}`;
+          },
+          dateFormat: 'yyyy-MM-dd'
+        }
       });
       chartRef.current = cv;
       seriesRef.current = cv.addCandlestickSeries({
@@ -126,6 +157,11 @@ export function KLineChart({ code }: { code: string }) {
       ma20Ref.current = cv.addLineSeries({ color: '#722ed1', lineWidth: 1, priceLineVisible: false, lastValueVisible: false });
       chartReadyRef.current = true;
 
+      // Apply data if already fetched (handles fetch-arrived-first race)
+      if (allDataRef.current.length) {
+        applyDataToChart(allDataRef.current);
+      }
+
       ro = new ResizeObserver(() => {
         if (chartRef.current && containerRef.current) {
           chartRef.current.applyOptions({ width: containerRef.current.clientWidth });
@@ -135,23 +171,22 @@ export function KLineChart({ code }: { code: string }) {
 
       // Subscribe to scroll for lazy loading
       scrollHandler = (range: LogicalRange | null) => {
-        if (!range || isLoadingMoreRef.current) return;
+        if (!range || isLoadingMoreRef.current || hasReachedStartRef.current) return;
         const total = allDataRef.current.length;
         if (total === 0) return;
-        // When user scrolls near the left edge (range.from < 5), load more old data
-        if (range.from < 5) {
+        // Only trigger when the user has scrolled past the leftmost bar
+        // (range.from is negative when the viewport extends into the left margin).
+        if (range.from < 0) {
           loadMore(allDataRef.current, period, code);
         }
       };
       cv.timeScale().subscribeVisibleLogicalRangeChange(scrollHandler);
 
-      // Apply data if already fetched
-      if (allDataRef.current.length) {
-        applyDataToChart(allDataRef.current);
-      }
-    }).catch((err: Error) => setError(err.message));
+      }).catch((err: Error) => setError(err.message));
+    });
 
     return () => {
+      cancelAnimationFrame(raf);
       ro?.disconnect();
       if (scrollHandler && chartRef.current) {
         chartRef.current.timeScale().unsubscribeVisibleLogicalRangeChange(scrollHandler);
@@ -175,9 +210,10 @@ export function KLineChart({ code }: { code: string }) {
     setHasData(false);
     allDataRef.current = [];
     isLoadingMoreRef.current = false;
+    hasReachedStartRef.current = false;
 
     const cached = getCached<{ items: KlineRow[] }>(cacheKey);
-    if (cached && Date.now() - cached.timestamp < KLINE_TTL[period]) {
+    if (cached && Date.now() - cached.timestamp < KLINE_TTL_MS) {
       if (cached.data.items.length) {
         allDataRef.current = cached.data.items;
         setHasData(true);
@@ -207,22 +243,7 @@ export function KLineChart({ code }: { code: string }) {
 
   return (
     <Card
-      title={
-        <Space>
-          <Typography.Text strong>K线</Typography.Text>
-          <Radio.Group
-            size="small"
-            value={period}
-            onChange={(e) => setPeriod(e.target.value as Period)}
-            optionType="button"
-            buttonStyle="solid"
-          >
-            <Radio.Button value="daily">日K</Radio.Button>
-            <Radio.Button value="weekly">周K</Radio.Button>
-            <Radio.Button value="monthly">月K</Radio.Button>
-          </Radio.Group>
-        </Space>
-      }
+      title={<Typography.Text strong>K线（日K）</Typography.Text>}
       extra={
         loadingMore ? (
           <Spin size="small" />
@@ -244,17 +265,37 @@ export function KLineChart({ code }: { code: string }) {
         )
       }
     >
-      {loading ? (
-        <div style={{ height: 360, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-          <Spin />
-        </div>
-      ) : error ? (
-        <Empty description={error} />
-      ) : !hasData ? (
-        <Empty description="暂无K线数据" />
-      ) : (
-        <div ref={containerRef} style={{ width: '100%' }} />
-      )}
+      <div style={{ position: 'relative', width: '100%' }}>
+        <div ref={containerRef} style={{ width: '100%', height: 360 }} />
+        {loading ? (
+          <div
+            data-testid="kline-loading"
+            style={{
+              position: 'absolute',
+              inset: 0,
+              minHeight: 360,
+              display: 'flex',
+              flexDirection: 'column',
+              alignItems: 'center',
+              justifyContent: 'center',
+              gap: 12,
+              background: '#ffffff'
+            }}
+          >
+            <Spin size="large" />
+            <Typography.Text type="secondary">正在加载 K 线数据…</Typography.Text>
+          </div>
+        ) : error ? (
+          <div style={{ position: 'absolute', inset: 0, minHeight: 360, display: 'flex', alignItems: 'center', justifyContent: 'center', background: '#ffffff' }}>
+            <Empty description={error} />
+          </div>
+        ) : !hasData ? (
+          <div style={{ position: 'absolute', inset: 0, minHeight: 360, display: 'flex', alignItems: 'center', justifyContent: 'center', background: '#ffffff' }}>
+            <Empty description="暂无K线数据" />
+          </div>
+        ) : null}
+      </div>
+    
     </Card>
   );
 }

@@ -32,7 +32,9 @@ export function useFundFlow() {
   const { getCached, setCached } = useLocalStorageCache();
 
   const load = useCallback(async (showLoading = true, forceRefresh = false) => {
-    const cacheKey = `cache_fund_flow_${tab}`;
+    // Bump the cache key suffix whenever the backend payload shape changes so
+    // stale entries (e.g. older 10-row sector outflows) are not reused.
+    const cacheKey = `cache_fund_flow_v2_${tab}`;
     const cached = getCached<{ items: FundFlowRow[] }>(cacheKey);
 
     if (!forceRefresh && isCacheValid(cached, CACHE_TTL)) {

@@ -55,7 +55,7 @@ def fetch_sina_monthly(code: str, datalen: int = 120) -> list[dict]:
         return []
 
 
-def fetch_sina_daily(code: str, datalen: int = 1200) -> list[dict]:
+def fetch_sina_daily(code: str, datalen: int = 2500) -> list[dict]:
     """Fetch recent daily K-line from Sina Finance (no auth required)."""
     import urllib.request
 

@@ -70,7 +70,7 @@ export function BreadthListModal({ open, title, type, onClose, onNameClick }: Pr
   ];
 
   return (
-    <Modal title={title} open={open} onCancel={onClose} footer={null} width={520} destroyOnClose>
+    <Modal title={title} open={open} onCancel={onClose} footer={null} width={520} destroyOnHidden>
       {loading ? <Skeleton active /> : (
         <Table
           rowKey="code"
