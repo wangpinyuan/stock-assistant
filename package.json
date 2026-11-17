@@ -20,16 +20,30 @@
     "prisma:generate": "prisma generate",
     "prisma:migrate": "prisma migrate dev",
     "prisma:studio": "prisma studio",
-    "seed": "tsx prisma/seed.ts"
+    "seed": "tsx prisma/seed.ts",
+    "test": "node --import tsx --test services/api/tests/*.test.ts",
+    "test:worker": "python3 -B -m unittest discover -s services/worker/tests -v",
+    "test:ui": "node scripts/check-ui.mjs",
+    "start": "concurrently -k \"npm --workspace apps/web run start\" \"npm --workspace services/api run start\"",
+    "prisma:deploy": "prisma migrate deploy"
   },
   "dependencies": {
-    "@prisma/client": "^5.22.0"
+    "@prisma/client": "^5.22.0",
+    "dotenv": "^16.4.7"
   },
   "devDependencies": {
     "@types/node": "^20.17.10",
     "concurrently": "^9.1.0",
     "prisma": "^5.22.0",
     "tsx": "^4.19.2",
-    "typescript": "^5.7.2"
+    "typescript": "^5.7.2",
+    "eslint": "^9.0.0",
+    "eslint-config-next": "15.5.19",
+    "playwright": "1.65.1",
+    "@eslint/eslintrc": "^3.3.1"
+  },
+  "overrides": {
+    "react": "18.3.1",
+    "react-dom": "18.3.1"
   }
 }

@@ -1,17 +1,22 @@
 export * from './market';
+export * from './contracts';
 
 export type AssetType = 'stock' | 'etf';
 
 export interface PortfolioSummary {
-  totalMarketValue: number;
-  todayProfit: number;
-  todayProfitRate: number;
-  totalProfit: number;
-  totalProfitRate: number;
+  totalMarketValue: number | null;
+  todayProfit: number | null;
+  todayProfitRate: number | null;
+  totalProfit: number | null;
+  totalProfitRate: number | null;
   holdingCount: number;
   stockCount: number;
   etfCount: number;
   updatedAt: string | null;
+  knownMarketValue: number;
+  missingQuoteCount: number;
+  quoteCoverage: number;
+  mixedQuoteDates: boolean;
 }
 
 export interface HoldingView {
@@ -21,15 +26,17 @@ export interface HoldingView {
   assetType: AssetType;
   quantity: number;
   averageCost: number;
-  currentPrice: number;
-  changeAmount: number;
-  changePercent: number;
-  marketValue: number;
-  weight: number;
-  todayProfit: number;
-  todayProfitRate: number;
-  totalProfit: number;
-  totalProfitRate: number;
+  currentPrice: number | null;
+  changeAmount: number | null;
+  changePercent: number | null;
+  marketValue: number | null;
+  weight: number | null;
+  todayProfit: number | null;
+  todayProfitRate: number | null;
+  totalProfit: number | null;
+  totalProfitRate: number | null;
+  buyDate: string | null;
+  quoteTradeDate: string | null;
   tags: string | null;
   note: string | null;
 }
@@ -81,6 +88,7 @@ export interface StockAnalysisSummary {
 
 export interface NewsItemView {
   id: number;
+  code: string | null;
   type: string;
   title: string;
   source: string | null;

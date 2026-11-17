@@ -11,7 +11,7 @@ import argparse
 import json
 import os
 import sys
-from datetime import datetime
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 WORKER_DIR = Path(__file__).resolve().parent.parent
@@ -21,35 +21,19 @@ if str(WORKER_DIR) not in sys.path:
 from worker import common  # noqa: E402  (path adjusted above)
 
 
-def generate_a_share_codes() -> list[str]:
-    """Generate all A-share stock codes."""
-    codes = []
-    # Shanghai: 600000-603999, 688xxx
-    for i in range(600000, 604000):
-        codes.append(f"{i:06d}")
-    for i in range(688000, 689000):
-        codes.append(f"{i:06d}")
-    # Shenzhen main: 000xxx
-    for i in range(1, 2000):
-        codes.append(f"{i:06d}")
-    # Shenzhen SME: 002xxx
-    for i in range(2000, 3000):
-        codes.append(f"{i:06d}")
-    # Shenzhen ChiNext: 300xxx
-    for i in range(3000, 4000):
-        codes.append(f"{i:06d}")
-    # Beijing: 8xxxxx
-    for i in range(800000, 804000):
-        codes.append(f"{i:06d}")
-    return codes
+def load_a_share_codes() -> list[str]:
+    """Load listed security codes from the provider universe."""
+    from worker.providers.eastmoney import fetch_snapshot, STOCKS
+    return [str(row['f12']) for row in fetch_snapshot(STOCKS)]
 
 
-def fetch_sina_spot() -> list[dict]:
+def fetch_sina_spot(codes: list[str] | None = None) -> list[dict]:
     """Return Sina real-time snapshot for all A-shares in batches."""
     import re
     import urllib.request
+    from lookup_stock import get_market_prefix
 
-    all_codes = generate_a_share_codes()
+    all_codes = load_a_share_codes() if codes is None else codes
     batch_size = 200
     all_records = []
 
@@ -58,10 +42,7 @@ def fetch_sina_spot() -> list[dict]:
         # Sina needs sh/sz prefix based on code range
         prefixed = []
         for code in batch:
-            if code.startswith(("5", "6", "9", "8")):
-                prefixed.append(f"sh{code}")
-            else:
-                prefixed.append(f"sz{code}")
+            prefixed.append(f"{get_market_prefix(code)}{code}")
 
         codes_str = ",".join(prefixed)
         url = f"https://hq.sinajs.cn/list={codes_str}"
@@ -75,7 +56,7 @@ def fetch_sina_spot() -> list[dict]:
                 data = resp.read().decode("gbk", errors="replace")
 
             for line in data.strip().split("\n"):
-                m = re.search(r'hq_str_(sh|sz)(\w+)="([^"]*)"', line)
+                m = re.search(r'hq_str_(sh|sz|bj)(\w+)="([^"]*)"', line)
                 if not m:
                     continue
                 prefix = m.group(1)
@@ -92,7 +73,7 @@ def fetch_sina_spot() -> list[dict]:
                 # Fields: name, open, pre_close, current, high, low, ...
                 # For indices: pre_close is fields[1], current is fields[3]
                 # For stocks: pre_close is fields[2], current is fields[3]
-                is_index = code.startswith(("000", "399"))
+                is_index = False
                 try:
                     pre_close = float(fields[1]) if is_index else float(fields[2])
                 except (ValueError, IndexError):
@@ -116,6 +97,7 @@ def fetch_sina_spot() -> list[dict]:
                 all_records.append({
                     "code": code,
                     "name": name,
+                    "tradeDate": fields[30] if len(fields) > 30 else None,
                     "currentPrice": current,
                     "open": float(fields[1]) if not is_index and fields[1] and fields[1] != "-" else None,
                     "high": float(fields[4]) if fields[4] and fields[4] != "-" else None,
@@ -124,11 +106,11 @@ def fetch_sina_spot() -> list[dict]:
                     "changeAmount": change,
                     "changePercent": change_pct,
                     "volume": volume,
-                    "turnover": None,
+                    "turnover": common.to_decimal(fields[9]),
                     "turnoverRate": None,
                 })
         except Exception as exc:
-            common.log(f"failed to fetch Sina batch {i // batch_size + 1}: {exc}")
+            raise RuntimeError(f"failed to fetch Sina batch {i // batch_size + 1}: {exc}") from exc
 
     return all_records
 
@@ -137,11 +119,14 @@ def fetch_akshare_spot() -> list[dict]:
     """Return the AKShare real-time snapshot as a list of plain dicts."""
     import akshare as ak  # type: ignore
 
+    calendar = ak.tool_trade_date_hist_sina()
+    snapshot_date = common.snapshot_trade_date(calendar['trade_date'])
     df = ak.stock_zh_a_spot_em()
     records = df.to_dict(orient="records")
     return [
         {
             "code": common.normalize_code(row.get("代码")),
+            "tradeDate": row.get("日期") or snapshot_date,
             "name": (row.get("名称") or "").strip(),
             "currentPrice": common.to_decimal(row.get("最新价")),
             "open": common.to_decimal(row.get("今开")),
@@ -150,7 +135,7 @@ def fetch_akshare_spot() -> list[dict]:
             "preClose": common.to_decimal(row.get("昨收")),
             "changeAmount": common.to_decimal(row.get("涨跌额")),
             "changePercent": common.to_decimal(row.get("涨跌幅")),
-            "volume": common.to_decimal(row.get("成交量")),
+            "volume": common.scaled_decimal(row.get("成交量"), 100),
             "turnover": common.to_decimal(row.get("成交额")),
             "turnoverRate": common.to_decimal(row.get("换手率")),
         }
@@ -169,13 +154,13 @@ def fetch_tushare_daily(codes: list[str], trade_date: str) -> list[dict]:
 
     out: list[dict] = []
     for code in codes:
-        market = "SH" if code.startswith(("5", "6", "9")) else "SZ"
-        df = pro.daily(ts_code=f"{code}.{market}", trade_date=trade_date)
+        df = common.fetch_daily_bars(pro, code, trade_date=trade_date)
         if df is None or df.empty:
             continue
         for _, row in df.iterrows():
             out.append({
                 "code": common.normalize_code(str(row.get("ts_code", "")).split(".")[0]),
+                "tradeDate": row.get("trade_date"),
                 "currentPrice": common.to_decimal(row.get("close")),
                 "open": common.to_decimal(row.get("open")),
                 "high": common.to_decimal(row.get("high")),
@@ -183,8 +168,8 @@ def fetch_tushare_daily(codes: list[str], trade_date: str) -> list[dict]:
                 "preClose": common.to_decimal(row.get("pre_close")),
                 "changeAmount": common.to_decimal(row.get("change")),
                 "changePercent": common.to_decimal(row.get("pct_chg")),
-                "volume": common.to_decimal(row.get("vol")),
-                "turnover": common.to_decimal(row.get("amount")),
+                "volume": common.scaled_decimal(row.get("vol"), 100),
+                "turnover": common.scaled_decimal(row.get("amount"), 1000),
                 "turnoverRate": None,
             })
     return out
@@ -192,9 +177,6 @@ def fetch_tushare_daily(codes: list[str], trade_date: str) -> list[dict]:
 
 def persist(records: list[dict]) -> dict:
     """Upsert quote records. Returns a summary dict."""
-    today = datetime.utcnow().strftime("%Y-%m-%d")
-    # Convert date string to Unix timestamp in milliseconds for Prisma compatibility
-    today_ts = int(datetime.strptime(today, "%Y-%m-%d").timestamp() * 1000)
     summary = {"total": 0, "updated": 0, "skipped": 0}
     with common.connect() as conn:
         for record in records:
@@ -203,7 +185,8 @@ def persist(records: list[dict]) -> dict:
                 continue
             payload = {
                 "code": record["code"],
-                "tradeDate": today_ts,
+                "name": record.get("name"),
+                "tradeDate": record.get("tradeDate"),
                 "currentPrice": record.get("currentPrice"),
                 "open": record.get("open"),
                 "high": record.get("high"),
@@ -217,6 +200,8 @@ def persist(records: list[dict]) -> dict:
                 "turnoverRate": record.get("turnoverRate"),
             }
             try:
+                if payload["tradeDate"] is None:
+                    raise ValueError("Provider did not supply a trading date")
                 common.upsert_quote(conn, payload)
                 summary["updated"] += 1
             except Exception as exc:  # noqa: BLE001
@@ -230,22 +215,24 @@ def main() -> int:
     parser = argparse.ArgumentParser(description="Update stock quote snapshots.")
     parser.add_argument("--codes", help="Comma-separated stock codes to refresh (defaults to holdings+watchlist)")
     parser.add_argument("--source", choices=["akshare", "tushare", "sina"], default="sina")
+    parser.add_argument("--market", action="store_true", help="Refresh full market instead of selected securities")
     args = parser.parse_args()
 
     overrides = common.parse_codes_arg(args.codes)
-    targets = overrides or common.load_target_codes()
+    targets = overrides or ([] if args.market else common.load_target_codes())
+    if not targets and not args.market:
+        print(json.dumps({"ok": True, "updated": 0, "message": "no target codes"}))
+        return 0
 
     try:
         if args.source == "tushare":
             today = datetime.utcnow().strftime("%Y%m%d")
             records = fetch_tushare_daily(targets, today)
         elif args.source == "sina":
-            # Sina always fetches all A-shares for market breadth
-            records = fetch_sina_spot()
-            # Sina fetches all stocks for breadth calculation, no filtering
+            records = fetch_sina_spot(None if args.market else targets)
         else:
             records = fetch_akshare_spot()
-            records = common.filter_codes(records, targets)
+            records = common.filter_codes(records, None if args.market else targets)
     except Exception as exc:  # noqa: BLE001
         common.log(f"fetch failed: {exc}")
         print(json.dumps({"ok": false, "error": str(exc)}))
@@ -256,11 +243,11 @@ def main() -> int:
         return 0
 
     summary = persist(records)
-    summary["ok"] = True
+    summary["ok"] = summary["skipped"] == 0
     summary["targets"] = targets
     summary["source"] = args.source
     print(json.dumps(summary, ensure_ascii=False))
-    return 0
+    return 0 if summary["ok"] else 1
 
 
 if __name__ == "__main__":

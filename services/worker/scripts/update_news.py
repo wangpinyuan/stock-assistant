@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import re
 import sys
 import urllib.request
 from datetime import datetime
@@ -28,8 +29,7 @@ def fetch_sina_news() -> list[dict]:
         with urllib.request.urlopen(req, timeout=30) as resp:
             data = json.loads(resp.read().decode("utf-8"))
     except Exception as exc:
-        common.log(f"failed to fetch Sina news: {exc}")
-        return []
+        raise RuntimeError(f"failed to fetch Sina news: {exc}") from exc
 
     items = []
     if data.get("result") and data["result"].get("data"):
@@ -37,9 +37,9 @@ def fetch_sina_news() -> list[dict]:
             # Parse timestamp
             ctime = item.get("ctime", "")
             try:
-                pub_date = datetime.fromtimestamp(int(ctime)).strftime("%Y-%m-%d %H:%M:%S") if ctime else ""
+                pub_date = int(ctime) * 1000 if ctime else None
             except (ValueError, OSError):
-                pub_date = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                pub_date = None
 
             # Determine news type from URL or content
             url_str = item.get("url", "")
@@ -53,14 +53,8 @@ def fetch_sina_news() -> list[dict]:
                 news_type = "资讯"
 
             # Extract stock code from URL if present (e.g., /stock/sz000001/)
-            code = None
-            for prefix in ["sz", "sh"]:
-                if prefix in url_str:
-                    start = url_str.find(prefix)
-                    if start != -1:
-                        code_candidate = url_str[start:start+8]
-                        code = common.normalize_code(code_candidate[2:])
-                        break
+            match = re.search(r'(?:sz|sh)(\d{6})(?!\d)', url_str)
+            code = match.group(1) if match else None
 
             items.append({
                 "type": news_type,
@@ -77,10 +71,10 @@ def fetch_sina_news() -> list[dict]:
 
 def persist_news(items: list[dict]) -> dict:
     """Insert news items into database."""
-    summary = {"total": 0, "inserted": 0, "skipped": 0}
+    summary = {"total": 0, "inserted": 0, "skipped": 0, "failed": 0}
     with common.connect() as conn:
         for item in items:
-            if not item.get("title"):
+            if not item.get("title") or item.get("publishDate") is None:
                 summary["skipped"] += 1
                 continue
 
@@ -95,6 +89,8 @@ def persist_news(items: list[dict]) -> dict:
                 continue
 
             try:
+                if item.get("code"):
+                    common.ensure_stock(conn, item["code"])
                 conn.execute("""
                     INSERT INTO NewsItem (type, code, title, source, publishDate, url, summary, sentiment, impactOnHolding)
                     VALUES (?, ?, ?, ?, ?, ?, ?, 'neutral', 0)
@@ -110,7 +106,7 @@ def persist_news(items: list[dict]) -> dict:
                 summary["inserted"] += 1
             except Exception as exc:
                 common.log(f"failed to insert news {item.get('title', '')[:50]}: {exc}")
-                summary["skipped"] += 1
+                summary["failed"] += 1
             summary["total"] += 1
 
     return summary
@@ -126,9 +122,9 @@ def main() -> int:
         return 0
 
     summary = persist_news(items)
-    summary["ok"] = True
+    summary["ok"] = summary["failed"] == 0
     print(json.dumps(summary, ensure_ascii=False))
-    return 0
+    return 0 if summary["ok"] else 1
 
 
 if __name__ == "__main__":

@@ -2,7 +2,7 @@ import { Card, Statistic } from 'antd';
 
 interface MetricCardProps {
   title: string;
-  value: number | string;
+  value: number | string | null;
   prefix?: string;
   suffix?: string;
   precision?: number;
@@ -15,7 +15,7 @@ export function MetricCard({ title, value, prefix, suffix, precision = 2, profit
 
   return (
     <Card>
-      <Statistic title={title} value={value} prefix={prefix} precision={typeof value === 'number' ? precision : undefined} suffix={suffix} valueStyle={valueStyle} />
+      <Statistic title={title} value={value ?? '-'} prefix={prefix} precision={typeof value === 'number' ? precision : undefined} suffix={suffix} valueStyle={valueStyle} />
     </Card>
   );
 }

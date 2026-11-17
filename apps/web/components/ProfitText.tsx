@@ -1,4 +1,5 @@
-export function ProfitText({ value, suffix = '', prefix = '' }: { value: number; suffix?: string; prefix?: string }) {
+export function ProfitText({ value, suffix = '', prefix = '' }: { value: number | null; suffix?: string; prefix?: string }) {
+  if (value == null) return <span>-</span>;
   const className = value >= 0 ? 'positive' : 'negative';
   const sign = value > 0 ? '+' : '';
 
