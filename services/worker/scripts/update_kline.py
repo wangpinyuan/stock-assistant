@@ -32,10 +32,7 @@ def fetch_tushare_daily(code: str, start_date: str, end_date: str) -> list[dict]
         raise RuntimeError("TUSHARE_TOKEN is not configured")
     pro = ts.pro_api(token)
 
-    market = "SH" if code.startswith(("5", "6", "9")) else "SZ"
-    ts_code = f"{code}.{market}"
-
-    df = pro.daily(ts_code=ts_code, start_date=start_date, end_date=end_date)
+    df = common.fetch_daily_bars(pro, code, start_date=start_date, end_date=end_date)
     if df is None or df.empty:
         return []
     return df.to_dict(orient="records")
@@ -124,6 +121,8 @@ def calc_ma(values: list[float | None], window: int) -> list[float | None]:
 # ==================== Persistence ====================
 
 def upsert_daily(conn, payload: dict) -> None:
+    common.ensure_stock(conn, payload["code"])
+    payload = {**payload, "tradeDate": common.date_to_millis(payload["tradeDate"])}
     columns = ["code", "tradeDate", "open", "high", "low", "close", "volume", "turnover", "ma5", "ma10", "ma20"]
     values = [payload.get(col) for col in columns]
     placeholders = ", ".join("?" for _ in columns)
@@ -136,7 +135,9 @@ def upsert_daily(conn, payload: dict) -> None:
 
 
 def upsert_weekly(conn, payload: dict) -> None:
-    columns = ["code", "weekDate", "open", "high", "low", "close", "volume", "turnover", "ma5", "ma10", "ma20"]
+    common.ensure_stock(conn, payload["code"])
+    payload = {**payload, "weekDate": common.date_to_millis(payload["weekDate"])}
+    columns = ["code", "weekDate", "open", "high", "low", "close", "volume", "ma5", "ma10", "ma20"]
     values = [payload.get(col) for col in columns]
     placeholders = ", ".join("?" for _ in columns)
     assignments = ", ".join(f"{col}=excluded.{col}" for col in columns if col not in ("code", "weekDate"))
@@ -148,7 +149,9 @@ def upsert_weekly(conn, payload: dict) -> None:
 
 
 def upsert_monthly(conn, payload: dict) -> None:
-    columns = ["code", "monthDate", "open", "high", "low", "close", "volume", "turnover", "ma5", "ma10", "ma20"]
+    common.ensure_stock(conn, payload["code"])
+    payload = {**payload, "monthDate": common.date_to_millis(payload["monthDate"])}
+    columns = ["code", "monthDate", "open", "high", "low", "close", "volume", "ma5", "ma10", "ma20"]
     values = [payload.get(col) for col in columns]
     placeholders = ", ".join("?" for _ in columns)
     assignments = ", ".join(f"{col}=excluded.{col}" for col in columns if col not in ("code", "monthDate"))
@@ -165,6 +168,7 @@ def process_daily(conn, code: str, start_date: str, end_date: str) -> dict:
     if not rows:
         return {"code": code, "updated": 0, "skipped": 0, "daily_rows": []}
 
+    rows = sorted(rows, key=lambda row: str(row["trade_date"]))
     closes = [common.to_decimal(r.get("close")) for r in rows]
     ma5_vals = calc_ma(closes, 5)
     ma10_vals = calc_ma(closes, 10)
@@ -172,13 +176,12 @@ def process_daily(conn, code: str, start_date: str, end_date: str) -> dict:
 
     updated = 0
     skipped = 0
-    # rows come in descending order; reverse for ascending storage
-    for i, row in enumerate(reversed(rows)):
+    for i, row in enumerate(rows):
         trade_date = row.get("trade_date", "")
         if not trade_date:
             skipped += 1
             continue
-        mi = len(rows) - 1 - i
+        mi = i
         payload = {
             "code": common.normalize_code(code),
             "tradeDate": trade_date,
@@ -186,7 +189,7 @@ def process_daily(conn, code: str, start_date: str, end_date: str) -> dict:
             "high": common.to_decimal(row.get("high")),
             "low": common.to_decimal(row.get("low")),
             "close": common.to_decimal(row.get("close")),
-            "volume": common.to_decimal(row.get("vol")),
+            "volume": common.scaled_decimal(row.get("vol"), 100),
             "turnover": None,
             "ma5": ma5_vals[mi] if mi < len(ma5_vals) and ma5_vals[mi] is not None else None,
             "ma10": ma10_vals[mi] if mi < len(ma10_vals) and ma10_vals[mi] is not None else None,
@@ -209,6 +212,7 @@ def process_weekly_from_daily(conn, code: str, daily_rows: list[dict]) -> dict:
     if not rows:
         return {"code": code, "updated": 0, "skipped": 0}
 
+    rows = sorted(rows, key=lambda row: str(row["trade_date"]))
     closes = [common.to_decimal(r.get("close")) for r in rows]
     ma5_vals = calc_ma(closes, 5)
     ma10_vals = calc_ma(closes, 10)
@@ -216,12 +220,12 @@ def process_weekly_from_daily(conn, code: str, daily_rows: list[dict]) -> dict:
 
     updated = 0
     skipped = 0
-    for i, row in enumerate(reversed(rows)):
+    for i, row in enumerate(rows):
         week_date = row.get("trade_date", "")
         if not week_date:
             skipped += 1
             continue
-        mi = len(rows) - 1 - i
+        mi = i
         payload = {
             "code": common.normalize_code(code),
             "weekDate": str(week_date)[:10] if week_date else "",
@@ -229,7 +233,7 @@ def process_weekly_from_daily(conn, code: str, daily_rows: list[dict]) -> dict:
             "high": common.to_decimal(row.get("high")),
             "low": common.to_decimal(row.get("low")),
             "close": common.to_decimal(row.get("close")),
-            "volume": common.to_decimal(row.get("vol")),
+            "volume": common.scaled_decimal(row.get("vol"), 100),
             "turnover": None,
             "ma5": ma5_vals[mi] if mi < len(ma5_vals) and ma5_vals[mi] is not None else None,
             "ma10": ma10_vals[mi] if mi < len(ma10_vals) and ma10_vals[mi] is not None else None,
@@ -252,6 +256,7 @@ def process_monthly_from_daily(conn, code: str, daily_rows: list[dict]) -> dict:
     if not rows:
         return {"code": code, "updated": 0, "skipped": 0}
 
+    rows = sorted(rows, key=lambda row: str(row["trade_date"]))
     closes = [common.to_decimal(r.get("close")) for r in rows]
     ma5_vals = calc_ma(closes, 5)
     ma10_vals = calc_ma(closes, 10)
@@ -259,12 +264,12 @@ def process_monthly_from_daily(conn, code: str, daily_rows: list[dict]) -> dict:
 
     updated = 0
     skipped = 0
-    for i, row in enumerate(reversed(rows)):
+    for i, row in enumerate(rows):
         month_date = row.get("trade_date", "")
         if not month_date:
             skipped += 1
             continue
-        mi = len(rows) - 1 - i
+        mi = i
         payload = {
             "code": common.normalize_code(code),
             "monthDate": str(month_date)[:10] if month_date else "",
@@ -272,7 +277,7 @@ def process_monthly_from_daily(conn, code: str, daily_rows: list[dict]) -> dict:
             "high": common.to_decimal(row.get("high")),
             "low": common.to_decimal(row.get("low")),
             "close": common.to_decimal(row.get("close")),
-            "volume": common.to_decimal(row.get("vol")),
+            "volume": common.scaled_decimal(row.get("vol"), 100),
             "turnover": None,
             "ma5": ma5_vals[mi] if mi < len(ma5_vals) and ma5_vals[mi] is not None else None,
             "ma10": ma10_vals[mi] if mi < len(ma10_vals) and ma10_vals[mi] is not None else None,
@@ -331,9 +336,9 @@ def main() -> int:
                 common.log(f"failed to process {code}: {exc}")
                 results.append({"code": code, "error": str(exc)})
 
-    summary = {"ok": True, "updated": all_updated, "skipped": all_skipped, "codes": results}
+    summary = {"ok": all_skipped == 0 and not any("error" in row for row in results), "updated": all_updated, "skipped": all_skipped, "codes": results}
     print(json.dumps(summary, ensure_ascii=False))
-    return 0
+    return 0 if summary["ok"] else 1
 
 
 if __name__ == "__main__":

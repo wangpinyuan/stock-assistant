@@ -1,4 +1,6 @@
 export interface Breadth {
+  scope: string;
+  missingCount: number;
   tradeDate: string | null;
   upCount: number;
   downCount: number;
@@ -24,7 +26,8 @@ export interface SectorFlow {
   name: string;
   changePercent: number | null;
   mainNetInflow: number | null;
-  stockCount: number;
+  stockCount: number | null;
+  tradeDate: string;
 }
 
 export interface FundFlowRow {

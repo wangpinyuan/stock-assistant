@@ -3,15 +3,11 @@
   "version": "0.1.0",
   "private": true,
   "type": "module",
-  "overrides": {
-    "react": "^18.3.1",
-    "react-dom": "^18.3.1"
-  },
   "scripts": {
-    "dev": "next dev -p ${WEB_PORT:-8888}",
-    "build": "next build",
-    "start": "next start -p ${WEB_PORT:-8888}",
-    "lint": "next lint",
+    "dev": "node ../../scripts/web.mjs dev",
+    "build": "node ../../scripts/web.mjs build",
+    "start": "node ../../scripts/web.mjs start",
+    "lint": "eslint app components features hooks lib --max-warnings=0",
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {

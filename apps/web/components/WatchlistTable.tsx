@@ -5,8 +5,8 @@ import { Button, Form, Input, message, Modal, Table, Typography } from 'antd';
 import type { ColumnsType } from 'antd/es/table';
 import { fetchApi, postApi, putApi, deleteApi } from '../lib/api';
 import { ProfitText } from './ProfitText';
-import { KLineChart } from './KLineChart';
-import type { WatchlistView } from '@stock-assistant/shared';
+import { StockKLineModal } from './StockKLineModal';
+import type { WatchlistView, WatchlistInput } from '@stock-assistant/shared';
 
 interface WatchlistFormValues {
   code: string;
@@ -16,10 +16,11 @@ interface WatchlistFormValues {
 interface WatchlistTableProps {
   watchlist: WatchlistView[];
   loading: boolean;
-  onReload: () => void;
+  onReload: () => Promise<void>;
 }
 
 export function WatchlistTable({ watchlist, loading, onReload }: WatchlistTableProps) {
+  const [messageApi, contextHolder] = message.useMessage();
   const [modalOpen, setModalOpen] = useState(false);
   const [editingItem, setEditingItem] = useState<WatchlistView | null>(null);
   const [saving, setSaving] = useState(false);
@@ -52,21 +53,22 @@ export function WatchlistTable({ watchlist, loading, onReload }: WatchlistTableP
         await putApi(`/watchlist/${editingItem.id}`, {
           note: values.note?.trim() || null
         });
-        message.success('已更新');
+        messageApi.success('已更新');
       } else {
-        const result = await postApi<{ ok: boolean; duplicate?: boolean }>('/watchlist', {
-          code: values.code.trim()
-        });
+        const input: WatchlistInput = { code: values.code.trim(), note: values.note?.trim() || null };
+        const result = await postApi<{ ok: boolean; duplicate?: boolean; update?: { ok: boolean; error?: string } }>('/watchlist', input);
         if (result.duplicate) {
-          message.warning('该代码已在自选中');
+          messageApi.warning('该代码已在自选中');
+        } else if (result.update && !result.update.ok) {
+          messageApi.warning(`已新增，行情更新失败：${result.update.error ?? '请重试'}`);
         } else {
-          message.success('已新增');
+          messageApi.success('已新增');
         }
       }
       setModalOpen(false);
-      onReload();
+      await onReload();
     } catch (error) {
-      message.error(error instanceof Error ? error.message : '保存失败');
+      messageApi.error(error instanceof Error ? error.message : '保存失败');
     } finally {
       setSaving(false);
     }
@@ -75,10 +77,10 @@ export function WatchlistTable({ watchlist, loading, onReload }: WatchlistTableP
   const remove = async (id: number) => {
     try {
       await deleteApi(`/watchlist/${id}`);
-      message.success('已删除');
-      onReload();
+      messageApi.success('已删除');
+      await onReload();
     } catch (error) {
-      message.error(error instanceof Error ? error.message : '删除失败');
+      messageApi.error(error instanceof Error ? error.message : '删除失败');
     }
   };
 
@@ -100,6 +102,7 @@ export function WatchlistTable({ watchlist, loading, onReload }: WatchlistTableP
 
   return (
     <>
+      {contextHolder}
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
         <Typography.Title level={4} style={{ margin: 0 }}>自选股</Typography.Title>
         <Button type="primary" onClick={openCreate}>新增自选</Button>
@@ -125,6 +128,7 @@ export function WatchlistTable({ watchlist, loading, onReload }: WatchlistTableP
       <Modal
         title={editingItem ? '编辑自选' : '新增自选'}
         open={modalOpen}
+        forceRender
         onCancel={() => setModalOpen(false)}
         onOk={submit}
         confirmLoading={saving}
@@ -134,18 +138,18 @@ export function WatchlistTable({ watchlist, loading, onReload }: WatchlistTableP
           <Form.Item label="股票代码" name="code" rules={[{ required: true, message: '请输入代码' }, { max: 20 }]}>
             <Input placeholder="例如 600519" disabled={Boolean(editingItem)} />
           </Form.Item>
+          <Form.Item label="备注" name="note">
+            <Input.TextArea rows={3} maxLength={500} />
+          </Form.Item>
         </Form>
       </Modal>
 
-      <Modal
-        title={`${selectedStockName} (${selectedStockCode}) K线`}
+      <StockKLineModal
         open={klineModalOpen}
-        onCancel={() => setKlineModalOpen(false)}
-        footer={null}
-        width={900}
-      >
-        {selectedStockCode && <KLineChart code={selectedStockCode} />}
-      </Modal>
+        code={selectedStockCode}
+        name={selectedStockName}
+        onClose={() => setKlineModalOpen(false)}
+      />
     </>
   );
 }

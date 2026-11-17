@@ -20,8 +20,12 @@ export function HomeDashboard() {
   const loadHoldings = useCallback(async () => {
     setHoldingsLoading(true);
     try {
-      const data = await fetchApi<{ items: HoldingView[] }>('/holdings');
+      const [data, nextSummary] = await Promise.all([
+        fetchApi<{ items: HoldingView[] }>('/holdings'),
+        fetchApi<PortfolioSummaryType>('/portfolio/summary')
+      ]);
       setHoldings(data.items);
+      setSummary(nextSummary);
     } finally {
       setHoldingsLoading(false);
     }

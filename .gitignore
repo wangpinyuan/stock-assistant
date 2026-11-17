@@ -19,3 +19,17 @@ __pycache__/
 *.pyc
 
 .DS_Store
+
+# Local datasets, build metadata, and task scratch files
+*.db
+*.db.backup
+*.sqlite
+*.sqlite3
+*.tsbuildinfo
+work/
+playwright-report/
+test-results/
+
+*.db-journal
+*.db-wal
+*.db-shm

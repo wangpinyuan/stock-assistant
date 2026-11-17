@@ -1,5 +1,6 @@
 'use client';
 
+import type { SettingEntry } from '@stock-assistant/shared';
 import { useEffect, useMemo, useState } from 'react';
 import {
   Alert,
@@ -20,22 +21,11 @@ import {
 import type { ColumnsType } from 'antd/es/table';
 import { deleteApi, fetchApi, postApi, putApi } from '../../lib/api';
 
-interface SettingEntry {
-  id: number;
-  key: string;
-  value: string;
-  updatedAt: string;
-}
 
 const SECRET_KEYS = new Set(['tushare.token', 'claude.apiKey']);
 
-function mask(value: string): string {
-  if (!value) return '';
-  if (value.length <= 4) return '****';
-  return `${value.slice(0, 2)}${'*'.repeat(Math.max(4, value.length - 4))}${value.slice(-2)}`;
-}
-
 export default function SettingsPage() {
+  const [messageApi, contextHolder] = message.useMessage();
   const [settings, setSettings] = useState<SettingEntry[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -52,6 +42,7 @@ export default function SettingsPage() {
   const [editing, setEditing] = useState<SettingEntry | null>(null);
   const [editForm] = Form.useForm<{ key: string; value: string }>();
 
+  const configured = (key: string) => settings.some(item => item.key === key && item.configured);
   const byKey = useMemo(() => new Map(settings.map((s) => [s.key, s.value])), [settings]);
 
   const load = async () => {
@@ -77,22 +68,22 @@ export default function SettingsPage() {
 
   const saveTushare = async () => {
     if (!tushareToken.trim()) {
-      message.warning('请粘贴新的 Tushare Token，留空表示不修改');
+      messageApi.warning('请粘贴新的 Tushare Token，留空表示不修改');
       return;
     }
     try {
       await putApi('/settings', { items: [{ key: 'tushare.token', value: tushareToken.trim() }] });
-      message.success('Tushare Token 已保存');
+      messageApi.success('Tushare Token 已保存');
       setTushareToken('');
       await load();
     } catch (err) {
-      message.error(err instanceof Error ? err.message : '保存失败');
+      messageApi.error(err instanceof Error ? err.message : '保存失败');
     }
   };
 
   const saveClaude = async () => {
     if (!claudeApiKey.trim() && !claudeDefaultModel.trim() && !claudeDeepModel.trim()) {
-      message.warning('未提供任何更新');
+      messageApi.warning('未提供任何更新');
       return;
     }
     try {
@@ -101,24 +92,20 @@ export default function SettingsPage() {
       if (claudeDefaultModel.trim()) items.push({ key: 'claude.defaultModel', value: claudeDefaultModel.trim() });
       if (claudeDeepModel.trim()) items.push({ key: 'claude.deepModel', value: claudeDeepModel.trim() });
       if (items.length === 0) {
-        message.warning('请输入至少一项内容');
+        messageApi.warning('请输入至少一项内容');
         return;
       }
       await putApi('/settings', { items });
-      message.success('Claude 配置已保存');
+      messageApi.success('Claude 配置已保存');
       setClaudeApiKey('');
       await load();
     } catch (err) {
-      message.error(err instanceof Error ? err.message : '保存失败');
+      messageApi.error(err instanceof Error ? err.message : '保存失败');
     }
   };
 
   const testTushare = async () => {
-    const token = tushareToken.trim() || byKey.get('tushare.token') || '';
-    if (!token) {
-      message.warning('未配置 Tushare Token');
-      return;
-    }
+    const token = tushareToken.trim();
     setTestingTushare(true);
     setTushareResult(null);
     try {
@@ -132,12 +119,8 @@ export default function SettingsPage() {
   };
 
   const testClaude = async () => {
-    const apiKey = claudeApiKey.trim() || byKey.get('claude.apiKey') || '';
+    const apiKey = claudeApiKey.trim();
     const model = claudeDefaultModel.trim() || byKey.get('claude.defaultModel') || 'claude-sonnet-4-6';
-    if (!apiKey) {
-      message.warning('未配置 Claude API Key');
-      return;
-    }
     setTestingClaude(true);
     setClaudeResult(null);
     try {
@@ -160,29 +143,30 @@ export default function SettingsPage() {
     const values = await editForm.validateFields();
     const trimmedKey = values.key.trim();
     if (!trimmedKey) {
-      message.error('键不能为空');
+      messageApi.error('键不能为空');
       return;
     }
     try {
       if (trimmedKey !== editing.key) {
-        await deleteApi(`/settings?key=${encodeURIComponent(editing.key)}`);
+        await postApi('/settings/rename', { from: editing.key, to: trimmedKey, value: values.value });
+      } else {
+        await putApi('/settings', { items: [{ key: trimmedKey, value: values.value }] });
       }
-      await putApi('/settings', { items: [{ key: trimmedKey, value: values.value }] });
-      message.success('已保存');
+      messageApi.success('已保存');
       setEditing(null);
       await load();
     } catch (err) {
-      message.error(err instanceof Error ? err.message : '保存失败');
+      messageApi.error(err instanceof Error ? err.message : '保存失败');
     }
   };
 
   const remove = async (key: string) => {
     try {
       await deleteApi(`/settings?key=${encodeURIComponent(key)}`);
-      message.success('已删除');
+      messageApi.success('已删除');
       await load();
     } catch (err) {
-      message.error(err instanceof Error ? err.message : '删除失败');
+      messageApi.error(err instanceof Error ? err.message : '删除失败');
     }
   };
 
@@ -192,7 +176,7 @@ export default function SettingsPage() {
       title: '值',
       dataIndex: 'value',
       ellipsis: true,
-      render: (value: string, row) => (SECRET_KEYS.has(row.key) && value ? mask(value) : value)
+      render: (value: string, row) => (row.secret ? (row.configured ? '已配置' : '未配置') : value)
     },
     { title: '更新时间', dataIndex: 'updatedAt', width: 200, render: (v: string) => new Date(v).toLocaleString() },
     {
@@ -220,6 +204,7 @@ export default function SettingsPage() {
 
   return (
     <Space direction="vertical" size="large" style={{ width: '100%' }}>
+      {contextHolder}
       <Typography.Title level={2} style={{ margin: 0 }}>设置</Typography.Title>
 
       <Row gutter={[16, 16]}>
@@ -227,7 +212,7 @@ export default function SettingsPage() {
           <Card title="Tushare">
             <Space direction="vertical" style={{ width: '100%' }}>
               <Typography.Text type="secondary">
-                当前 Token：{byKey.get('tushare.token') ? mask(byKey.get('tushare.token') ?? '') : '未配置'}
+                当前 Token：{configured('tushare.token') ? '已配置' : '未配置'}
               </Typography.Text>
               <Input.Password
                 value={tushareToken}
@@ -249,7 +234,7 @@ export default function SettingsPage() {
           <Card title="Claude">
             <Space direction="vertical" style={{ width: '100%' }}>
               <Typography.Text type="secondary">
-                当前 API Key：{byKey.get('claude.apiKey') ? mask(byKey.get('claude.apiKey') ?? '') : '未配置'}
+                当前 API Key：{configured('claude.apiKey') ? '已配置' : '未配置'}
               </Typography.Text>
               <Input.Password
                 value={claudeApiKey}
@@ -295,12 +280,12 @@ export default function SettingsPage() {
         open={Boolean(editing)}
         onCancel={() => setEditing(null)}
         onOk={submitEdit}
-        destroyOnClose
+        forceRender
         width={520}
       >
         <Form form={editForm} layout="vertical" preserve={false}>
           <Form.Item label="键" name="key" rules={[{ required: true, max: 100 }]}>
-            <Input placeholder="例如 claude.defaultModel" />
+            <Input placeholder="例如 claude.defaultModel" disabled={Boolean(editing && SECRET_KEYS.has(editing.key))} />
           </Form.Item>
           <Form.Item label="值" name="value">
             <Input.TextArea rows={4} maxLength={10000} placeholder={editing && SECRET_KEYS.has(editing.key) ? '留空表示保持原值' : ''} />

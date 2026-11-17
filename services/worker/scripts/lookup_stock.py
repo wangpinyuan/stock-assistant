@@ -33,16 +33,16 @@ def get_market_prefix(code: str) -> str:
         return "hk"
     if normalized.startswith("us"):
         return "us"  # US indices handled separately
-    # Pad numeric codes to 6 digits
+    if normalized.startswith(('sh', 'sz', 'bj')):
+        return normalized[:2]
     normalized = normalized.zfill(6)
-    # Shanghai indices (000xxx, 001xxx) -> sh
-    # Shenzhen indices (399xxx) -> sz
-    # Stocks: 6xxxx -> sh, 0xxxx -> sz
-    if normalized.startswith(("6", "5", "9")):
-        return "sh"
-    if normalized.startswith(("000", "001", "002")):
-        return "sh"
-    return "sz"
+    if normalized.startswith('92'):
+        return 'bj'
+    if normalized.startswith(('6', '5', '9')):
+        return 'sh'
+    if normalized.startswith(('4', '8')):
+        return 'bj'
+    return 'sz'
 
 
 def fetch_from_yahoo(symbol: str) -> Optional[dict]:
@@ -76,7 +76,8 @@ def lookup(code: str) -> dict:
     try:
         normalized = code.strip().zfill(6)
         market = get_market_prefix(normalized)
-        url = f"https://hq.sinajs.cn/list={market}{normalized}"
+        symbol = normalized if normalized.startswith(("sh", "sz", "bj")) else f"{market}{normalized}"
+        url = f"https://hq.sinajs.cn/list={symbol}"
         req = urllib.request.Request(url, headers={
             "Referer": "https://finance.sina.com.cn",
             "User-Agent": "Mozilla/5.0"
@@ -92,7 +93,7 @@ def lookup(code: str) -> dict:
         name = fields[0]
         # For indices: field[1] is prevClose, field[3] is current price
         # For stocks: field[2] is prevClose, field[3] is current price
-        is_index = normalized.startswith(("000", "399"))
+        is_index = False
         prev_close = float(fields[1]) if is_index else float(fields[2])
         current_price = float(fields[3]) if fields[3] and fields[3] != "-" else None
         change = None
@@ -112,7 +113,7 @@ def lookup(code: str) -> dict:
         return {"ok": False, "error": str(exc)}
 
 
-def lookup_batch(codes: list[str]) -> dict:
+def lookup_batch(codes: list[str], indices: bool = False) -> dict:
     try:
         items = []
         for code in codes:
@@ -143,9 +144,9 @@ def lookup_batch(codes: list[str]) -> dict:
             if normalized.isdigit():
                 normalized = normalized.zfill(6)
 
-            market = get_market_prefix(normalized)
+            market = 'sh' if indices and normalized in ('000300', '000905') else get_market_prefix(normalized)
             # For HK indices, the prefix is already in the code, don't add it again
-            if market == "hk":
+            if market == "hk" or normalized.startswith(("sh", "sz", "bj")):
                 url = f"https://hq.sinajs.cn/list={normalized}"
             else:
                 url = f"https://hq.sinajs.cn/list={market}{normalized}"
@@ -166,7 +167,7 @@ def lookup_batch(codes: list[str]) -> dict:
                 continue
             name = fields[0]
             is_hk_index = normalized.startswith("hk")
-            is_a_index = normalized.startswith(("000", "399"))
+            is_a_index = False
             if is_hk_index:
                 # HK index format: fields[0]=symbol, fields[1]=name, fields[2]=current, fields[3]=prev_close
                 prev_close = float(fields[3]) if fields[3] and fields[3] != "-" else None
@@ -201,17 +202,18 @@ def main() -> int:
     parser = argparse.ArgumentParser(description="Look up stock info by code")
     parser.add_argument("code", help="Stock code or comma-separated codes")
     parser.add_argument("--batch", action="store_true", help="Batch mode for multiple codes")
+    parser.add_argument("--indices", action="store_true", help="Interpret known numeric index identifiers as indices")
     args = parser.parse_args()
 
     if args.batch:
         codes = [c.strip() for c in args.code.split(",") if c.strip()]
-        result = lookup_batch(codes)
+        result = lookup_batch(codes, args.indices)
     else:
         codes = [c.strip() for c in args.code.split(",") if c.strip()]
         if len(codes) == 1:
             result = lookup(codes[0])
         else:
-            result = lookup_batch(codes)
+            result = lookup_batch(codes, args.indices)
 
     print(json.dumps(result, ensure_ascii=False))
     return 0 if result.get("ok") else 1

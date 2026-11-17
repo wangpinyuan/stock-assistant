@@ -35,8 +35,8 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
   return body as T;
 }
 
-export function fetchApi<T>(path: string): Promise<T> {
-  return request<T>(path);
+export function fetchApi<T>(path: string, init?: RequestInit): Promise<T> {
+  return request<T>(path, init);
 }
 
 export function postApi<T>(path: string, payload: unknown): Promise<T> {
